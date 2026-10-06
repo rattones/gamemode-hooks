@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# usermod falso: so grava a chamada em MOCK_LOG.
+[[ -n "${MOCK_LOG:-}" ]] && echo "usermod $*" >> "$MOCK_LOG"
+exit 0

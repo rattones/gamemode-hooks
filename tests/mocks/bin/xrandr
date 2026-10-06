@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# xrandr falso: dois monitores ficticios (DP-1 primario, eDP-1). Outras chamadas
+# que nao --query sao gravadas em MOCK_LOG. MOCK_XRANDR_FAIL=1 simula sem X.
+[[ -n "${MOCK_XRANDR_FAIL:-}" ]] && exit 1
+if [[ "${1:-}" == --query || $# -eq 0 ]]; then
+  cat <<'OUT'
+Screen 0: minimum 8 x 8, current 4480 x 1440, maximum 32767 x 32767
+DP-1 connected primary 2560x1440+0+0 (normal left inverted right x axis y axis) 597mm x 336mm
+   2560x1440    165.00*+  60.00
+   1920x1080     60.00
+eDP-1 connected 1920x1080+2560+0 (normal left inverted right x axis y axis) 344mm x 194mm
+   1920x1080     60.00*+  48.00
+HDMI-1 disconnected (normal left inverted right x axis y axis)
+OUT
+  exit 0
+fi
+[[ -n "${MOCK_LOG:-}" ]] && echo "xrandr $*" >> "$MOCK_LOG"
+exit 0

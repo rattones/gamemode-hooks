@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# systemctl falso (so --user): list-units imprime MOCK_SERVICES; is-active diz
+# que sim para os de MOCK_SERVICES; stop/start gravam em MOCK_LOG.
+[[ "${1:-}" == --user ]] && shift
+case "${1:-}" in
+  list-units) for s in ${MOCK_SERVICES:-}; do echo "$s loaded active running mock"; done ;;
+  is-active)  [[ " ${MOCK_SERVICES:-} " == *" ${3:-$2} "* ]] ;;
+  stop|start) [[ -n "${MOCK_LOG:-}" ]] && echo "systemctl $*" >> "$MOCK_LOG" ;;
+esac

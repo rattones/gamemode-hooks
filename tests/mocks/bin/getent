@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# getent falso so para "group gamemode" (MOCK_GAMEMODE_GROUP=none: nao existe);
+# o resto vai para o getent de verdade.
+if [[ "${1:-}" == group && "${2:-}" == gamemode ]]; then
+  [[ "${MOCK_GAMEMODE_GROUP:-}" == none ]] && exit 2
+  echo "gamemode:x:999:"; exit 0
+fi
+exec /usr/bin/getent "$@"

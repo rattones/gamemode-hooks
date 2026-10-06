@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Liga/desliga manualmente os mesmos ajustes que o GameMode aplica.
+# Uso: modo-jogo on | off | status | toggle
+set -u
+
+START="${HOME}/.local/bin/gamemode-start.sh"
+END="${HOME}/.local/bin/gamemode-end.sh"
+STATE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state"
+
+status() {
+    local prof free
+    prof=$(cat /sys/firmware/acpi/platform_profile 2>/dev/null || echo "?")
+    free=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader 2>/dev/null || echo "?")
+    if [ -f "$STATE" ]; then echo "modo-jogo: LIGADO"; else echo "modo-jogo: desligado"; fi
+    echo "  perfil ACPI : $prof"
+    echo "  governor    : $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)"
+    echo "  VRAM livre  : $free"
+    echo "  monitores   : $(xrandr --query 2>/dev/null | awk '/ connected/{printf "%s ", $1}')"
+}
+
+case "${1:-toggle}" in
+    on)
+        [ -f "$STATE" ] && { echo "ja esta ligado"; status; exit 0; }
+        "$START"; echo; status ;;
+    off)
+        [ -f "$STATE" ] || { echo "ja esta desligado"; status; exit 0; }
+        "$END"; echo; status ;;
+    toggle)
+        if [ -f "$STATE" ]; then "$END"; else "$START"; fi; echo; status ;;
+    status)
+        status ;;
+    *)
+        echo "uso: modo-jogo [on|off|toggle|status]" >&2; exit 2 ;;
+esac

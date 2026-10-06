@@ -1,0 +1,4 @@
+# /etc/sudoers.d/platform-profile - deixa os hooks do GameMode trocarem o perfil
+# de energia sem senha. So libera este caminho exato, que deve ser do root e nao
+# gravavel por outros. O install.sh mostra os comandos para instalar.
+@USER@ ALL=(root) NOPASSWD: /usr/local/bin/platform-profile

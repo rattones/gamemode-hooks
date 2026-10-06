@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# id falso so para "-nG USUARIO": devolve MOCK_GROUPS (padrao: so "users");
+# o resto vai para o id de verdade.
+if [[ "${1:-}" == -nG ]]; then echo "${MOCK_GROUPS:-users}"; exit 0; fi
+exec /usr/bin/id "$@"

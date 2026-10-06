@@ -1,0 +1,17 @@
+#!/bin/sh
+# Ajusta o perfil de energia da plataforma (ACPI platform_profile), em qualquer
+# notebook que o exponha: Lenovo, ASUS, HP, Dell, entre outros.
+# Uso: platform-profile <perfil>     (os validos estao em platform_profile_choices)
+#
+# Roda como root via sudo, chamado pelos hooks do GameMode. Por isso so aceita
+# um nome que o proprio firmware lista: nada de texto livre indo para o sysfs.
+set -eu
+ACPI=/sys/firmware/acpi
+choices=$(cat "$ACPI/platform_profile_choices" 2>/dev/null) \
+    || { echo "este sistema nao tem $ACPI/platform_profile" >&2; exit 1; }
+want="${1:-}"
+case " $choices " in
+    *" $want "*) [ -n "$want" ] ;;
+    *) echo "uso: $0 <$(echo "$choices" | tr ' ' '|')>" >&2; exit 2 ;;
+esac
+printf '%s' "$want" > "$ACPI/platform_profile"

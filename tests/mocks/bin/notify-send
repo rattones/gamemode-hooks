@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# notify-send falso: grava a notificacao em MOCK_LOG.
+[[ -n "${MOCK_LOG:-}" ]] && echo "notify $*" >> "$MOCK_LOG"
+exit 0

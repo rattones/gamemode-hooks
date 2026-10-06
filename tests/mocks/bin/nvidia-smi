@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# nvidia-smi falso (placa ficticia de 8 GiB). MOCK_NVIDIA=none simula sem placa
+# NVIDIA; MOCK_VRAM_FREE define a VRAM livre (de 8192 MiB).
+[[ "${MOCK_NVIDIA:-}" == none ]] && { echo "NVIDIA-SMI has failed" >&2; exit 9; }
+case "$*" in
+  -L) echo "GPU 0: NVIDIA GeForce RTX 4060 Laptop GPU (UUID: GPU-mock)" ;;
+  *memory.free,memory.total*) echo "${MOCK_VRAM_FREE:-7000}, 8192" ;;
+  *name,memory.total*) echo "NVIDIA GeForce RTX 4060 Laptop GPU, 8192 MiB" ;;
+  *) echo "mock" ;;
+esac

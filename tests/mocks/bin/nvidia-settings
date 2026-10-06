@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# nvidia-settings falso. MOCK_NVSETTINGS=none simula ausente. -a grava em MOCK_LOG.
+[[ "${MOCK_NVSETTINGS:-}" == none ]] && exit 1
+case "${1:-}" in
+  --version) echo "nvidia-settings: version mock" ;;
+  -q) echo "0" ;;
+  -a) [[ -n "${MOCK_LOG:-}" ]] && echo "nvidia-settings $*" >> "$MOCK_LOG" ;;
+esac
+exit 0
