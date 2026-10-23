@@ -169,8 +169,8 @@ group "hooks: start e end com a configuracao gerada"
 runhook() {
   local h="$1" s="$2"
   HOME="$h" PATH="$MOCKS:$PATH" XDG_RUNTIME_DIR="$h/run" XDG_SESSION_TYPE="${SESSION:-x11}" \
-    GH_ACPI_DIR="${ACPI:-$TMP/sem-acpi}" MOCK_LOG="$h/log" MOCK_SUDO_ALLOW="${ALLOW:-}" \
-    MOCK_VRAM_FREE="${VFREE:-7000}" MOCK_SERVICES="${SVCS:-}" \
+    GH_ACPI_DIR="${ACPI:-$TMP/sem-acpi}" GH_PROC_DIR="${PROC:-$TMP/sem-proc}" \
+    MOCK_LOG="$h/log" MOCK_SUDO_ALLOW="${ALLOW:-}" MOCK_VRAM_FREE="${VFREE:-7000}" MOCK_SERVICES="${SVCS:-}" \
     "$h/.local/bin/$s" >/dev/null 2>&1
 }
 H="$TMP/h1"; mkdir -p "$H/run"; : > "$H/log"
@@ -188,6 +188,27 @@ log=$(cat "$H/log")
 has "end: volta o perfil anterior"        "$log" "sudo /usr/local/bin/platform-profile balanced"
 has "end: religa o servico"               "$log" "systemctl start lan.service"
 has "end: restaura os dois monitores"     "$log" "--output eDP-1 --mode 1920x1080 --pos 2560x0"
+
+# Opcao por jogo: a variavel vem do ambiente do processo do gamemoderun.
+# fakeproc DIR PID VAR=valor...: cria um /proc/PID/environ falso
+fakeproc() { local d="$1/$2"; shift 2; mkdir -p "$d"; printf '%s\0' "$@" > "$d/environ"; }
+fakeproc "$TMP/proc1" 100 "HOME=/x" "GAMEMODE_SINGLE_MONITOR=0"
+fakeproc "$TMP/proc1" 200 "LD_PRELOAD=libgamemodeauto.so.0" "GAMEMODE_SINGLE_MONITOR=0"
+fakeproc "$TMP/proc2" 100 "HOME=/x" "GAMEMODE_SINGLE_MONITOR=0"
+H="$TMP/h1"; : > "$H/log"; rm -f "$H/run/gamemode-tweaks.state"
+PROC="$TMP/proc1" runhook "$H" gamemode-start.sh
+lacks "jogo com GAMEMODE_SINGLE_MONITOR=0: nao desliga" "$(cat "$H/log")" "--off"
+runhook "$H" gamemode-end.sh
+lacks "end sem troca: nao mexe nos monitores" "$(cat "$H/log")" "--output"
+: > "$H/log"
+PROC="$TMP/proc2" runhook "$H" gamemode-start.sh
+has "variavel fora do gamemoderun: ignora" "$(cat "$H/log")" "--output eDP-1 --off"
+runhook "$H" gamemode-end.sh; : > "$H/log"
+HOME="$H" PATH="$MOCKS:$PATH" XDG_RUNTIME_DIR="$H/run" XDG_SESSION_TYPE=x11 \
+  GH_ACPI_DIR="$TMP/sem-acpi" GH_PROC_DIR="$TMP/sem-proc" MOCK_LOG="$H/log" \
+  GAMEMODE_SINGLE_MONITOR=0 "$H/.local/bin/gamemode-start.sh" >/dev/null 2>&1
+lacks "modo-jogo com a variavel: nao desliga" "$(cat "$H/log")" "--off"
+runhook "$H" gamemode-end.sh
 
 H="$TMP/h4"; mkdir -p "$H/run"; : > "$H/log"
 sed -i 's/^RUN_MONITOR=.*/RUN_MONITOR=0/' "$H/.config/gamemode-tweaks.conf"

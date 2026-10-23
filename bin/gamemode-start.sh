@@ -26,8 +26,9 @@ CONF="${HOME}/.config/gamemode-tweaks.conf"
 : "${VRAM_WARN_PCT:=78}"
 : "${PAUSE_SERVICES:=}"
 
-# Raiz do ACPI no sysfs (so os testes trocam).
+# Raiz do ACPI no sysfs e do /proc (so os testes trocam).
 ACPI_DIR="${GH_ACPI_DIR:-/sys/firmware/acpi}"
+PROC_DIR="${GH_PROC_DIR:-/proc}"
 
 # Quem grava o perfil como root, via "sudo -n" (regra no sudoers). O nome
 # antigo, legion-profile, continua aceito para instalacoes anteriores.
@@ -58,6 +59,23 @@ save_state() {
 }
 
 notify() { command -v notify-send >/dev/null 2>&1 && notify-send -a GameMode "$@"; }
+
+# Valor de uma variavel posta nas opcoes de inicializacao do jogo
+# ("VAR=x gamemoderun %command%"). O hook e filho do gamemoded, nao do jogo,
+# entao ela e lida do ambiente dos processos do usuario carregados pelo
+# gamemoderun (LD_PRELOAD com libgamemodeauto). O D-Bus (ListGames) nao serve
+# aqui: o gamemoded so responde depois que este script termina. No
+# "modo-jogo on" a variavel vem do proprio ambiente.
+game_env() {
+    local f v
+    if [ -n "${!1:-}" ]; then printf '%s' "${!1}"; return; fi
+    for f in "$PROC_DIR"/[0-9]*/environ; do
+        [ -O "$f" ] || continue
+        grep -qzas '^LD_PRELOAD=.*libgamemodeauto' "$f" || continue
+        v=$(grep -zas "^$1=" "$f" | head -zn1 | tr -d '\0')
+        if [ -n "$v" ]; then printf '%s' "${v#*=}"; return; fi
+    done
+}
 
 # Monta o comando xrandr que reproduz o layout atual, para o end.sh desfazer.
 capture_layout() {
@@ -113,6 +131,13 @@ if [ "$SET_POWERMIZER" = 1 ] && command -v nvidia-settings >/dev/null 2>&1; then
         PREV_PM=$(nvidia-settings -q '[gpu:0]/GPUPowerMizerMode' -t 2>/dev/null | head -1)
     fi
     nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=1' >/dev/null 2>&1 || PREV_PM=""
+fi
+
+# --- Opcao por jogo: "GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%" nas
+#     opcoes de inicializacao mantem todos os monitores ligados nesse jogo ---
+if [ "$SINGLE_MONITOR" = 1 ] && [ -n "$GAME_MONITOR" ] && [ "$APPLIED_MONITOR" != "1" ]; then
+    override=$(game_env GAMEMODE_SINGLE_MONITOR)
+    [ -n "$override" ] && SINGLE_MONITOR="$override"
 fi
 
 # --- Monitores: joga no GAME_MONITOR, desliga o resto ---

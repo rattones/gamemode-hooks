@@ -75,6 +75,17 @@ The power-profile helper is only printed, for you to review before running:
 Then `gamemoded -t` should end with "All Tests Passed". In the game (Steam →
 Properties → Launch Options): `gamemoderun %command%`.
 
+To keep every monitor on for one specific game, without changing the setting
+for the others, use in its launch options:
+
+```
+GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
+```
+
+The hook is not a child of the game (`gamemoded` runs it), so it looks for the
+variable in the environment of the processes started by `gamemoderun`. The same
+works for `modo-jogo`: `GAMEMODE_SINGLE_MONITOR=0 modo-jogo on`.
+
 ## Files
 
 | File | Goes to | Role |

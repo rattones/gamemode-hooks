@@ -74,6 +74,17 @@ antes de rodar:
 Depois, `gamemoded -t` deve terminar em "All Tests Passed". No jogo (Steam →
 Propriedades → Opções de inicialização): `gamemoderun %command%`.
 
+Para manter todos os monitores ligados num jogo específico, sem mudar a
+configuração dos outros, use nas opções de inicialização dele:
+
+```
+GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
+```
+
+O hook não é filho do jogo (quem o roda é o `gamemoded`), então ele procura a
+variável no ambiente dos processos abertos pelo `gamemoderun`. No `modo-jogo`
+vale o mesmo: `GAMEMODE_SINGLE_MONITOR=0 modo-jogo on`.
+
 ## Arquivos
 
 | Arquivo | Vai para | Papel |

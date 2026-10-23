@@ -242,6 +242,8 @@ write_conf() {
 
 # Monitor onde o jogo roda: ele vira primario e os outros sao desligados (so
 # X11). Vazio = nao mexer nos monitores. Nomes: xrandr --query | grep connected
+# Para manter todos ligados num jogo so, use nas opcoes de inicializacao dele:
+#   GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
 GAME_MONITOR=$GAME_MONITOR
 SINGLE_MONITOR=$SINGLE_MONITOR
 # Taxa de atualizacao no monitor do jogo: "auto" usa a maior, ou fixe (ex.: 59.98).
@@ -371,4 +373,6 @@ fi
   echo "(usando o $LEGACY_HELPER que ja existia; o $HELPER e a versao generica)"
 echo
 echo "No jogo (Steam > Propriedades > Opcoes de inicializacao): gamemoderun %command%"
+[[ "$SINGLE_MONITOR" == 1 ]] && \
+  echo "  (para manter os monitores ligados nesse jogo: GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%)"
 echo "Teste do GameMode: gamemoded -t   (deve terminar em \"All Tests Passed\")"
