@@ -86,6 +86,9 @@ The hook is not a child of the game (`gamemoded` runs it), so it looks for the
 variable in the environment of the processes started by `gamemoderun`. The same
 works for `modo-jogo`: `GAMEMODE_SINGLE_MONITOR=0 modo-jogo on`.
 
+To see how to launch games, the per-game options and what is enabled on this
+machine: `gamemoderun --help` (or `-h`).
+
 ## Files
 
 | File | Goes to | Role |
@@ -93,6 +96,7 @@ works for `modo-jogo`: `GAMEMODE_SINGLE_MONITOR=0 modo-jogo on`.
 | `bin/gamemode-start.sh` | `~/.local/bin/` | start hook |
 | `bin/gamemode-end.sh` | `~/.local/bin/` | end hook: undoes the start |
 | `bin/gamemode-monitor.sh` | `~/.local/bin/` | finds the game's PID through GameMode's D-Bus API (`ListGames` plus children, picking the largest RSS, since under Proton the game is a child of Steam's wrappers) and runs `monitor all -f pid:N`; with `MONITOR_PERF=auto` it adds `-P` when `perf` is allowed |
+| `bin/gamemoderun` | `~/.local/bin/` | wrapper around the system `gamemoderun`: `gamemoderun --help` (or `-h`) explains how to launch games and the per-game options, and shows this machine's settings; with a command, passes everything on to `/usr/games/gamemoderun` |
 | `bin/modo-jogo` | `~/.local/bin/` | turns the same tweaks on and off by hand: `modo-jogo on\|off\|toggle\|status` |
 | `config/gamemode.ini` | `~/.config/` | GameMode configuration: governor, renice and the hook paths (`@HOME@` becomes your home) |
 | (generated) `gamemode-tweaks.conf` | `~/.config/` | the hooks' options, commented; changes apply to the next game, no restart needed |

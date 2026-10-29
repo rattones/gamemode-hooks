@@ -58,7 +58,7 @@ eqv "monitores: escolhido o 1 (DP-1)"     "$(conf "$H" GAME_MONITOR)/$(conf "$H"
 eqv "servicos: pausa o escolhido"         "$(conf "$H" PAUSE_SERVICES)" '"lan.service"'
 has "lista os monitores com resolucao"    "$out" "1) DP-1 (2560x1440)"
 eqv "gamemode.ini com a home"             "$(grep -c "start = $H/.local/bin/gamemode-start.sh" "$H/.config/gamemode.ini")" "1"
-eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-end.sh gamemode-monitor.sh gamemode-start.sh modo-jogo "
+eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-end.sh gamemode-monitor.sh gamemode-start.sh gamemoderun modo-jogo "
 lacks "auxiliar liberado: nada de sudoers" "$out" "sudoers.d/platform-profile"
 
 # ===========================================================================
@@ -219,6 +219,27 @@ VFREE=7900 ACPI="$TMP/acpi2" runhook "$H" gamemode-end.sh
 VFREE=7900 runhook "$H" gamemode-start.sh
 lacks "VRAM folgada: sem alerta"          "$(cat "$H/log")" "VRAM livre baixa"
 lacks "sem monitor escolhido: nao mexe"   "$(cat "$H/log")" "--off"
+
+# ===========================================================================
+group "gamemoderun: --help e repasse ao do sistema"
+# ===========================================================================
+H="$TMP/h1"
+GMR="$H/.local/bin/gamemoderun"
+# um gamemoderun "do sistema" falso, depois deste no PATH
+mkdir -p "$TMP/sysgames"
+printf '#!/bin/sh\necho "real: $*"\n' > "$TMP/sysgames/gamemoderun"; chmod +x "$TMP/sysgames/gamemoderun"
+out=$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" --help 2>&1)
+has "--help: mostra o uso"                "$out" "gamemoderun %command%"
+has "--help: opcao por jogo"              "$out" "GAMEMODE_SINGLE_MONITOR=0"
+has "--help: le a configuracao"           "$out" "monitor unico     : ligado (DP-1)"
+has "--help: servicos da configuracao"    "$out" "servicos pausados : lan.service"
+has "--help: acha o do sistema"           "$out" "$TMP/sysgames/gamemoderun"
+eqv "-h igual a --help"                   "$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" -h 2>&1)" "$out"
+out=$(HOME="$TMP/sem-home" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" 2>&1)
+has "sem argumentos: mostra o uso"        "$out" "uso: gamemoderun"
+has "sem configuracao: avisa"             "$out" "rode o install.sh"
+out=$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" ./jogo --help -x 2>&1)
+eqv "repassa tudo ao do sistema"          "$out" "real: ./jogo --help -x"
 
 # ===========================================================================
 group "system/platform-profile"

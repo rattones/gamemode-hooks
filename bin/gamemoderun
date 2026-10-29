@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# gamemoderun - embrulho do gamemoderun do sistema com um --help.
+#
+# Fica em ~/.local/bin, que vem antes de /usr/games no PATH. Com -h/--help (ou
+# sem argumentos) mostra como iniciar os jogos; com qualquer outra coisa passa
+# tudo, sem mudar nada, para o gamemoderun do pacote gamemode.
+set -u
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/gamemode-tweaks.conf"
+
+# O gamemoderun do sistema: o proximo do PATH que nao seja este arquivo.
+real_gamemoderun() {
+  local self d c dirs
+  self="$(readlink -f -- "${BASH_SOURCE[0]}")"
+  IFS=: read -ra dirs <<< "${PATH:-}"
+  for d in "${dirs[@]}" /usr/games /usr/bin; do
+    c="${d:-.}/gamemoderun"
+    [[ -x "$c" && "$(readlink -f -- "$c")" != "$self" ]] && { echo "$c"; return 0; }
+  done
+  return 1
+}
+
+# conf_val CHAVE: valor da chave no gamemode-tweaks.conf (sem aspas)
+conf_val() {
+  local v
+  v=$(grep -E "^$1=" "$CONF" 2>/dev/null | tail -1 | cut -d= -f2-)
+  v="${v%\"}"; printf '%s' "${v#\"}"
+}
+
+onoff() { [[ "$1" == 1 ]] && echo "ligado${2:+ ($2)}" || echo "desligado"; }
+
+usage() {
+  local mon prof svc mbin
+  cat <<'EOF'
+uso: gamemoderun <comando do jogo> [argumentos...]
+     gamemoderun -h | --help
+
+Inicia o jogo com o GameMode ligado. Enquanto o jogo roda, o gamemoded aplica
+o governor "performance" na CPU e chama os hooks deste repositorio
+(gamemode-start.sh / gamemode-end.sh), que fazem o resto: perfil de energia,
+PowerMizer da NVIDIA, monitor unico, servicos pausados e coleta de dados. Ao
+fechar o jogo, tudo volta ao que era.
+
+COMO INICIAR
+  Steam (Propriedades > Opcoes de inicializacao):
+      gamemoderun %command%
+  Lutris: Configurar > Opcoes do sistema > "Ativar Feral GameMode"
+          (ou prefixo de comando: gamemoderun)
+  Heroic: Configuracoes do jogo > "Usar GameMode"
+  Terminal:
+      gamemoderun ./jogo --opcao
+      gamemoderun wine jogo.exe
+
+OPCOES POR JOGO (variaveis antes do gamemoderun)
+  GAMEMODE_SINGLE_MONITOR=0   mantem todos os monitores ligados neste jogo
+      GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
+  GAMEMODERUNEXEC=<prog>      roda o jogo atraves de outro programa
+      GAMEMODERUNEXEC=prime-run gamemoderun %command%   (GPU dedicada)
+
+COMBINANDO COM OUTRAS FERRAMENTAS
+  gamemoderun mangohud %command%
+  gamemoderun gamescope -f -- %command%
+  GAMEMODE_SINGLE_MONITOR=0 gamemoderun mangohud %command%
+
+CONFERIR E AJUSTAR
+  gamemoded -s              o GameMode esta ativo agora?
+  gamemoded -t              teste completo (deve terminar em "All Tests Passed")
+  modo-jogo on|off|status   os mesmos ajustes, a mao, sem jogo
+  ~/.config/gamemode-tweaks.conf   opcoes dos hooks (vale no proximo jogo)
+  ~/.config/gamemode.ini           governor, renice e caminhos dos hooks
+EOF
+
+  echo
+  if [[ -r "$CONF" ]]; then
+    mon="$(conf_val GAME_MONITOR)"
+    prof="$(conf_val PERF_PROFILE)"
+    svc="$(conf_val PAUSE_SERVICES)"
+    echo "NESTA MAQUINA ($CONF)"
+    echo "  perfil de energia : $(onoff "$(conf_val SET_PLATFORM_PROFILE)" "$prof")"
+    echo "  monitor unico     : $(onoff "$(conf_val SINGLE_MONITOR)" "$mon")"
+    echo "  PowerMizer NVIDIA : $(onoff "$(conf_val SET_POWERMIZER)")"
+    echo "  alerta de VRAM    : $(onoff "$(conf_val NOTIFY_VRAM)" "abaixo de $(conf_val VRAM_WARN_PCT)% livre")"
+    echo "  servicos pausados : ${svc:-nenhum}"
+    echo "  coleta (monitor)  : $(onoff "$(conf_val RUN_MONITOR)" "~/.monitor/log")"
+  else
+    echo "NESTA MAQUINA: sem $CONF - rode o install.sh do gamemode-hooks."
+  fi
+  if mbin=$(real_gamemoderun); then
+    echo "  gamemoderun real  : $mbin"
+  else
+    echo "  gamemoderun real  : nao encontrado (sudo apt install gamemode)"
+  fi
+}
+
+case "${1:-}" in
+  ""|-h|--help) usage; exit 0 ;;
+esac
+
+real=$(real_gamemoderun) || {
+  echo "gamemoderun: o do sistema nao foi encontrado (sudo apt install gamemode)" >&2
+  exit 127
+}
+exec "$real" "$@"
