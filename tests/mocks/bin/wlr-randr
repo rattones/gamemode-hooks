@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# wlr-randr falso: DP-1 e eDP-1, como o xrandr falso. So responde com
+# MOCK_WAYLAND=wlr; chamadas com argumentos sao gravadas em MOCK_LOG.
+[[ "${MOCK_WAYLAND:-}" == wlr ]] || exit 1
+if (( $# == 0 )); then
+  cat <<'OUT'
+DP-1 "Dell Inc. DELL S2721DGF (DP-1)"
+  Enabled: yes
+  Modes:
+    2560x1440 px, 59.951000 Hz (preferred)
+    2560x1440 px, 165.000000 Hz (current)
+  Position: 0,0
+  Transform: normal
+  Scale: 1.000000
+eDP-1 "BOE 0x0A1C (eDP-1)"
+  Enabled: yes
+  Modes:
+    1920x1080 px, 60.000000 Hz (preferred, current)
+  Position: 2560,0
+  Transform: normal
+  Scale: 1.250000
+OUT
+  exit 0
+fi
+[[ -n "${MOCK_LOG:-}" ]] && echo "wlr-randr $*" >> "$MOCK_LOG"
+exit 0

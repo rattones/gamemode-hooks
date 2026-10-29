@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# gamemoderun - embrulho do gamemoderun do sistema com um --help.
+# gamemoderun - embrulho do gamemoderun do sistema: --help e a pergunta dos
+# monitores.
 #
-# Fica em ~/.local/bin, que vem antes de /usr/games no PATH. Com -h/--help (ou
-# sem argumentos) mostra como iniciar os jogos; com qualquer outra coisa passa
-# tudo, sem mudar nada, para o gamemoderun do pacote gamemode.
+# Fica em ~/.local/bin, que vem antes de /usr/games no PATH (tambem no da
+# Steam). Com -h/--help (ou sem argumentos) mostra como iniciar os jogos. Com um
+# comando, pergunta em tela se o jogo roda so no monitor do jogo ou em todos e
+# passa tudo para o gamemoderun do pacote gamemode; a resposta vai no ambiente
+# do jogo, em GAMEMODE_SINGLE_MONITOR, que o gamemode-start.sh le.
 set -u
 
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/gamemode-tweaks.conf"
+HERE="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
 
 # O gamemoderun do sistema: o proximo do PATH que nao seja este arquivo.
 real_gamemoderun() {
@@ -29,8 +33,66 @@ conf_val() {
 
 onoff() { [[ "$1" == 1 ]] && echo "ligado${2:+ ($2)}" || echo "desligado"; }
 
+# dialog_bin NOME: o programa de dialogo do sistema. Pula o runtime da Steam,
+# que vem antes no PATH dos jogos e traz um zenity antigo.
+dialog_bin() {
+  local d dirs
+  IFS=: read -ra dirs <<< "${PATH:-}"
+  for d in "${dirs[@]}"; do
+    [[ "$d" == *steam-runtime* || "$d" == *pressure-vessel* ]] && continue
+    [[ -x "$d/$1" ]] && { echo "$d/$1"; return 0; }
+  done
+  return 1
+}
+
+# ask_monitors: pergunta em tela (zenity ou kdialog, no X11 e no Wayland) se o
+# jogo roda so no GAME_MONITOR ou em todos. Sem resposta em ASK_TIMEOUT
+# segundos, ou sem como perguntar, fica o padrao: so o monitor do jogo.
+ask_monitors() {
+  local gm t text dlg ans single=1
+  local run=(env -u LD_PRELOAD -u LD_LIBRARY_PATH)
+  [[ -n "${GAMEMODE_SINGLE_MONITOR:-}" ]] && return 0   # ja fixado nas opcoes do jogo
+  [[ -r "$CONF" ]] || return 0
+  [[ "$(conf_val SINGLE_MONITOR)" == 1 && "$(conf_val ASK_MONITOR)" != 0 ]] || return 0
+  gm="$(conf_val GAME_MONITOR)"; [[ -n "$gm" ]] || return 0
+  [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] || return 0
+  # Outro jogo (ou o modo-jogo) ja deixou so um monitor: nao ha o que perguntar.
+  grep -qs '^APPLIED_MONITOR=1' "${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state" && return 0
+  [[ -r "$HERE/gamemode-displays.sh" ]] || return 0
+  # shellcheck source=gamemode-displays.sh
+  . "$HERE/gamemode-displays.sh"
+  # So com o monitor do jogo conectado e algum outro ligado.
+  mon_state | awk -F'|' -v g="$gm" '$1 == g {s = 1} $1 != g && $2 == 1 {o = 1} END {exit !(s && o)}' \
+    || return 0
+
+  t="$(conf_val ASK_TIMEOUT)"; [[ "$t" =~ ^[0-9]+$ && "$t" -gt 0 ]] || t=15
+  text="Em quais monitores este jogo vai rodar?
+
+Sem resposta em $t s: so no $gm."
+  # O jogo vem com as bibliotecas e o overlay da Steam no ambiente (LD_*); o
+  # dialogo do sistema roda sem eles.
+  if [[ "${XDG_CURRENT_DESKTOP:-}" == *KDE* ]] && dlg=$(dialog_bin kdialog); then :
+  elif dlg=$(dialog_bin zenity) || dlg=$(dialog_bin kdialog); then :
+  else return 0
+  fi
+  case "${dlg##*/}" in
+    zenity)
+      # --switch tira o OK/Cancelar: os dois botoes sao extras, que imprimem o
+      # rotulo. Fechar a janela (sem rotulo) e o tempo esgotado ficam no padrao.
+      ans=$("${run[@]}" "$dlg" --question --switch --title="GameMode" --text="$text" \
+              --extra-button="So o $gm" --extra-button="Todos os monitores" --timeout="$t" 2>/dev/null)
+      [[ "$ans" == "Todos os monitores" ]] && single=0 ;;
+    kdialog)
+      # O kdialog nao tem tempo limite: o timeout corta (sai com 124, o padrao).
+      timeout "$t" "${run[@]}" "$dlg" --title "GameMode" --yes-label "So o $gm" \
+        --no-label "Todos os monitores" --yesno "$text" >/dev/null 2>&1
+      [[ $? == 1 ]] && single=0 ;;
+  esac
+  export GAMEMODE_SINGLE_MONITOR=$single
+}
+
 usage() {
-  local mon prof svc mbin
+  local mon prof svc ask mbin
   cat <<'EOF'
 uso: gamemoderun <comando do jogo> [argumentos...]
      gamemoderun -h | --help
@@ -44,16 +106,23 @@ fechar o jogo, tudo volta ao que era.
 COMO INICIAR
   Steam (Propriedades > Opcoes de inicializacao):
       gamemoderun %command%
-  Lutris: Configurar > Opcoes do sistema > "Ativar Feral GameMode"
-          (ou prefixo de comando: gamemoderun)
-  Heroic: Configuracoes do jogo > "Usar GameMode"
+  Lutris: Configurar > Opcoes do sistema > prefixo de comando: gamemoderun
+  Heroic: Configuracoes do jogo > Outros > "Usar GameMode"
   Terminal:
       gamemoderun ./jogo --opcao
       gamemoderun wine jogo.exe
 
-OPCOES POR JOGO (variaveis antes do gamemoderun)
-  GAMEMODE_SINGLE_MONITOR=0   mantem todos os monitores ligados neste jogo
-      GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
+MONITORES
+  Com um monitor do jogo configurado e outro ligado, ao abrir o jogo aparece a
+  pergunta: "So o <monitor>" ou "Todos os monitores". Sem resposta a tempo,
+  fica so o monitor do jogo. Funciona no X11 (xrandr) e no Wayland do KDE
+  (kscreen-doctor), do GNOME 48+ (gdctl) e do Sway/wlroots (wlr-randr).
+  Para nao perguntar num jogo, fixe a resposta nas opcoes de inicializacao:
+      GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%   (todos os monitores)
+      GAMEMODE_SINGLE_MONITOR=1 gamemoderun %command%   (so o do jogo)
+  Para nunca perguntar: ASK_MONITOR=0 no gamemode-tweaks.conf.
+
+OUTRAS OPCOES POR JOGO (variaveis antes do gamemoderun)
   GAMEMODERUNEXEC=<prog>      roda o jogo atraves de outro programa
       GAMEMODERUNEXEC=prime-run gamemoderun %command%   (GPU dedicada)
 
@@ -75,9 +144,13 @@ EOF
     mon="$(conf_val GAME_MONITOR)"
     prof="$(conf_val PERF_PROFILE)"
     svc="$(conf_val PAUSE_SERVICES)"
+    ask="$(conf_val ASK_MONITOR)"
     echo "NESTA MAQUINA ($CONF)"
     echo "  perfil de energia : $(onoff "$(conf_val SET_PLATFORM_PROFILE)" "$prof")"
     echo "  monitor unico     : $(onoff "$(conf_val SINGLE_MONITOR)" "$mon")"
+    if [[ "$(conf_val SINGLE_MONITOR)" == 1 && -n "$mon" ]]; then
+      echo "  pergunta ao abrir : $(onoff "$([[ "$ask" != 0 ]] && echo 1)" "espera $(conf_val ASK_TIMEOUT | sed 's/^$/15/') s")"
+    fi
     echo "  PowerMizer NVIDIA : $(onoff "$(conf_val SET_POWERMIZER)")"
     echo "  alerta de VRAM    : $(onoff "$(conf_val NOTIFY_VRAM)" "abaixo de $(conf_val VRAM_WARN_PCT)% livre")"
     echo "  servicos pausados : ${svc:-nenhum}"
@@ -100,4 +173,5 @@ real=$(real_gamemoderun) || {
   echo "gamemoderun: o do sistema nao foi encontrado (sudo apt install gamemode)" >&2
   exit 127
 }
+ask_monitors
 exec "$real" "$@"

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# zenity falso: grava a chamada em MOCK_LOG e responde conforme MOCK_DIALOG:
+# single ou all (o botao extra com esse rotulo), close (janela fechada) ou,
+# sem nada, tempo esgotado.
+[[ -n "${MOCK_LOG:-}" ]] && echo "zenity $*" >> "$MOCK_LOG"
+case "${MOCK_DIALOG:-}" in
+  single) for a; do [[ "$a" == "--extra-button=So o "* ]] && echo "${a#--extra-button=}"; done; exit 1 ;;
+  all)    echo "Todos os monitores"; exit 1 ;;
+  close)  exit 1 ;;
+  *)      exit 5 ;;
+esac

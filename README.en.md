@@ -15,7 +15,7 @@ generate the configuration.
 |---|---|---|
 | platform power profile set to performance | back to the previous profile | laptop with ACPI `platform_profile` |
 | NVIDIA PowerMizer set to "prefer maximum performance" | back to the previous mode | NVIDIA with `nvidia-settings` |
-| only the game's monitor on, at its highest refresh rate | the exact previous layout restored | X11 with `xrandr`, more than one monitor |
+| asks on screen: only the game's monitor or all of them; with the first, the others are turned off (on X11, at the highest refresh rate) | the exact previous layout restored | more than one monitor; X11 with `xrandr` or Wayland with `kscreen-doctor` (KDE), `gdctl` (GNOME 48+) or `wlr-randr` (wlroots) |
 | pauses the user services you chose | restarts only the ones it paused | systemd user session |
 | starts [monitor](https://github.com/rattones/monitor) on the game's PID | stops the collection | `monitor` installed |
 | notification with free VRAM, warning below 78% | notification that everything was restored | `nvidia-smi` |
@@ -55,8 +55,8 @@ What the installer detects, and the preset it becomes:
 | no `platform_profile` | off |
 | NVIDIA with `nvidia-settings` | PowerMizer and VRAM warning on |
 | NVIDIA without `nvidia-settings` | VRAM warning only |
-| X11 with more than one monitor | **asks** which monitor to keep for the game, or none |
-| a single monitor, Wayland, or no `xrandr` | monitors left alone |
+| more than one monitor (X11, or Wayland on KDE, GNOME 48+ or wlroots) | **asks** which one is the game's monitor, or none |
+| a single monitor, or no monitor tool (`xrandr`; on Wayland, `kscreen-doctor`, `gdctl` or `wlr-randr`) | monitors left alone |
 | `monitor` installed | collection on |
 | running user services | **asks** which ones to pause while playing |
 
@@ -75,19 +75,55 @@ The power-profile helper is only printed, for you to review before running:
 Then `gamemoded -t` should end with "All Tests Passed". In the game (Steam →
 Properties → Launch Options): `gamemoderun %command%`.
 
-To keep every monitor on for one specific game, without changing the setting
-for the others, use in its launch options:
+### One monitor or all of them, at launch
+
+With a game monitor chosen, every game started through `gamemoderun` begins
+with an on-screen question: **"So o <monitor>"** (only that one) or **"Todos os
+monitores"** (all). With no answer in 15 s (`ASK_TIMEOUT`), only the game's
+monitor stays on. The question uses `zenity` (or `kdialog` on KDE) and works on
+X11 and Wayland; it is skipped when only one monitor is already on, or when
+another game has already switched them.
+
+To skip the question for one game, fix the answer in its launch options:
 
 ```
-GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
+GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%   # all monitors
+GAMEMODE_SINGLE_MONITOR=1 gamemoderun %command%   # only the game's
 ```
 
-The hook is not a child of the game (`gamemoded` runs it), so it looks for the
+To never ask, set `ASK_MONITOR=0` in `gamemode-tweaks.conf`.
+
+The answer goes into the game's environment as `GAMEMODE_SINGLE_MONITOR`. The
+hook is not a child of the game (`gamemoded` runs it), so it looks for the
 variable in the environment of the processes started by `gamemoderun`. The same
-works for `modo-jogo`: `GAMEMODE_SINGLE_MONITOR=0 modo-jogo on`.
+works for `modo-jogo`, which does not ask: `GAMEMODE_SINGLE_MONITOR=0 modo-jogo on`.
+
+On Wayland the switch uses the desktop's own tool: `kscreen-doctor` (KDE
+Plasma), `gdctl` (GNOME 48 or newer) or `wlr-randr` (Sway and other wlroots
+compositors). There it only turns monitors on and off; resolution and refresh
+rate stay as they are. Cinnamon, XFCE and similar on Wayland have no such tool,
+and the monitors are left alone.
 
 To see how to launch games, the per-game options and what is enabled on this
 machine: `gamemoderun --help` (or `-h`).
+
+## Uninstall
+
+```bash
+sudo ./uninstall.sh                 # asks whether to delete the configuration
+sudo ./uninstall.sh --yes           # no questions: deletes everything
+sudo ./uninstall.sh --check         # only shows what it would delete
+sudo ./uninstall.sh --keep-config   # keeps ~/.config/gamemode-tweaks.conf
+sudo ./uninstall.sh --purge         # also deletes the .bak-* backups
+```
+
+If a game (or `modo-jogo`) is still active, its tweaks are undone first. Then
+the scripts in `~/.local/bin` and the configuration go away; the `gamemode.ini`
+that existed before the installer comes back from its backup (without one, the
+hooks' file is deleted). With `sudo`, `/usr/local/bin/platform-profile` and the
+`/etc/sudoers.d/platform-profile` rule are removed too; without it, the commands
+are shown. The `gamemode` group and GameMode itself stay, since they work
+without the hooks. Same as `sudo ./install.sh --uninstall`.
 
 ## Files
 
@@ -96,8 +132,10 @@ machine: `gamemoderun --help` (or `-h`).
 | `bin/gamemode-start.sh` | `~/.local/bin/` | start hook |
 | `bin/gamemode-end.sh` | `~/.local/bin/` | end hook: undoes the start |
 | `bin/gamemode-monitor.sh` | `~/.local/bin/` | finds the game's PID through GameMode's D-Bus API (`ListGames` plus children, picking the largest RSS, since under Proton the game is a child of Steam's wrappers) and runs `monitor all -f pid:N`; with `MONITOR_PERF=auto` it adds `-P` when `perf` is allowed |
-| `bin/gamemoderun` | `~/.local/bin/` | wrapper around the system `gamemoderun`: `gamemoderun --help` (or `-h`) explains how to launch games and the per-game options, and shows this machine's settings; with a command, passes everything on to `/usr/games/gamemoderun` |
+| `bin/gamemoderun` | `~/.local/bin/` | wrapper around the system `gamemoderun`: asks on screen whether the game uses one monitor or all of them and passes everything on to `/usr/games/gamemoderun`; `gamemoderun --help` (or `-h`) explains how to launch games and the per-game options, and shows this machine's settings |
+| `bin/gamemode-displays.sh` | `~/.local/bin/` | reads, switches and restores monitors with the session's tool (`xrandr`, `kscreen-doctor`, `gdctl` or `wlr-randr`); used by the hooks, `gamemoderun` and the installer |
 | `bin/modo-jogo` | `~/.local/bin/` | turns the same tweaks on and off by hand: `modo-jogo on\|off\|toggle\|status` |
+| `uninstall.sh` | — | uninstalls: shortcut for `install.sh --uninstall` |
 | `config/gamemode.ini` | `~/.config/` | GameMode configuration: governor, renice and the hook paths (`@HOME@` becomes your home) |
 | (generated) `gamemode-tweaks.conf` | `~/.config/` | the hooks' options, commented; changes apply to the next game, no restart needed |
 | `system/platform-profile` | `/usr/local/bin/` (root) | writes `/sys/firmware/acpi/platform_profile`, accepting only names from `platform_profile_choices` |
@@ -109,8 +147,10 @@ The scripts' messages and comments are in Portuguese.
 ## Dependencies
 
 - `gamemode`, `busctl` (systemd), `notify-send`
-- depending on the hardware: `xrandr` (X11), `nvidia-settings` and `nvidia-smi`
-  (NVIDIA)
+- depending on the hardware: `xrandr` (X11) or, on Wayland, `kscreen-doctor`
+  (KDE), `gdctl` (GNOME 48+) or `wlr-randr` (wlroots); `nvidia-settings` and
+  `nvidia-smi` (NVIDIA)
+- `zenity` or `kdialog`, for the monitor question
 - [monitor](https://github.com/rattones/monitor) at `~/.local/bin/monitor`, for
   the collection
 

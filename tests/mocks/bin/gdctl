@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# gdctl falso (GNOME 48): DP-1 primario e eDP-1, como o xrandr falso. So
+# responde com MOCK_WAYLAND=gnome; "set" e gravado em MOCK_LOG.
+[[ "${MOCK_WAYLAND:-}" == gnome ]] || exit 1
+if [[ "${1:-}" == show ]]; then
+  cat <<'OUT'
+Monitors:
+├──Monitor DP-1 (Dell 27")
+│  ├──Vendor: DEL
+│  ├──Product: DELL S2721DGF
+│  ├──Serial: 1234
+│  ├──Current mode
+│  │  └──2560x1440@165.000
+│  └──Preferred mode
+│     └──2560x1440@59.951
+└──Monitor eDP-1 (Built-in display)
+   ├──Vendor: BOE
+   ├──Product: 0x0a1c
+   ├──Current mode
+   │  └──1920x1080@60.000
+   └──Preferred mode
+      └──1920x1080@60.000
+
+Logical monitors:
+├──Logical monitor #1
+│  ├──Position: (0, 0)
+│  ├──Scale: 1.0
+│  ├──Transform: normal
+│  ├──Primary: yes
+│  └──Monitors: (1)
+│     └──DP-1 (Dell 27")
+└──Logical monitor #2
+   ├──Position: (2560, 0)
+   ├──Scale: 1.25
+   ├──Transform: normal
+   ├──Primary: no
+   └──Monitors: (1)
+      └──eDP-1 (Built-in display)
+OUT
+  exit 0
+fi
+[[ -n "${MOCK_LOG:-}" ]] && echo "gdctl $*" >> "$MOCK_LOG"
+exit 0

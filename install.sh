@@ -7,6 +7,8 @@
 #   sudo ./install.sh --yes           # sem perguntas: so aplica o que e certo
 #   sudo ./install.sh --check         # so mostra o que detectou e o que mudaria
 #   sudo ./install.sh --reconfigure   # gera de novo o gamemode-tweaks.conf
+#   sudo ./install.sh --uninstall     # desinstala (o mesmo que ./uninstall.sh)
+#        [--keep-config] [--purge]    #   mantem o gamemode-tweaks.conf / apaga os .bak-*
 #
 # Roda com sudo porque poe o usuario no grupo gamemode (usermod), que o polkit
 # do GameMode exige para trocar o governor da CPU. Os arquivos continuam sendo
@@ -16,7 +18,8 @@
 #   - perfil de energia da plataforma (ACPI platform_profile) e os nomes que o
 #     firmware oferece
 #   - placa NVIDIA (nvidia-smi, nvidia-settings): PowerMizer e alerta de VRAM
-#   - sessao X11 ou Wayland e monitores conectados (xrandr)
+#   - sessao X11 ou Wayland e monitores conectados (xrandr; no Wayland,
+#     kscreen-doctor, gdctl ou wlr-randr)
 #   - o monitor (github.com/rattones/monitor), para coletar dados do jogo
 #
 # O que e duvida vira pergunta: qual monitor usar no jogo quando ha mais de um,
@@ -38,12 +41,15 @@ HELPER=/usr/local/bin/platform-profile
 LEGACY_HELPER=/usr/local/bin/legion-profile
 
 ARGS=("$@")
-CHECK=0; YES=0; RECONF=0
+CHECK=0; YES=0; RECONF=0; UNINSTALL=0; KEEP_CONF=0; PURGE=0
 while (( $# )); do
   case "$1" in
     --check)       CHECK=1 ;;
     --yes|-y)      YES=1 ;;
     --reconfigure) RECONF=1 ;;
+    --uninstall)   UNINSTALL=1 ;;
+    --keep-config) KEEP_CONF=1 ;;
+    --purge)       PURGE=1 ;;
     -h|--help)     sed -n '3,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "opcao desconhecida: $1 (veja --help)" >&2; exit 2 ;;
   esac
@@ -84,8 +90,11 @@ CONF="$CONF_DIR/gamemode-tweaks.conf"
 # limpa DISPLAY e XDG_RUNTIME_DIR, e sem eles nem xrandr nem systemctl --user
 # enxergam a sessao).
 as_user() {
-  local env=(HOME="$THOME" DISPLAY="${DISPLAY:-:0}" XDG_RUNTIME_DIR="/run/user/$TUID"
+  local env=(HOME="$THOME" DISPLAY="${DISPLAY:-:0}" XDG_RUNTIME_DIR="${GH_RUNTIME_DIR:-/run/user/$TUID}"
+             XDG_SESSION_TYPE="$SESSION" XDG_CURRENT_DESKTOP="$DESKTOP"
+             DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$TUID/bus}"
              PATH="$PATH") xa
+  [[ "$SESSION" == wayland ]] && env+=(WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}")
   # Autorizacao do X: ~/.Xauthority (LightDM e outros) ou a do GDM.
   for xa in "${XAUTHORITY:-}" "$THOME/.Xauthority" "/run/user/$TUID/gdm/Xauthority"; do
     [[ -n "$xa" && -r "$xa" ]] && { env+=(XAUTHORITY="$xa"); break; }
@@ -103,6 +112,18 @@ session_type() {
   [[ -n "$s" ]] && s=$(loginctl show-session "$s" -p Type --value 2>/dev/null)
   echo "${s:-x11}"
 }
+# Area de trabalho (KDE, GNOME...): escolhe a ferramenta de monitores no Wayland.
+desktop() {
+  local s
+  [[ -n "${XDG_CURRENT_DESKTOP:-}" ]] && { echo "$XDG_CURRENT_DESKTOP"; return; }
+  s=$(loginctl show-user "$TU" -p Display --value 2>/dev/null)
+  [[ -n "$s" ]] && loginctl show-session "$s" -p Desktop --value 2>/dev/null
+}
+SESSION="$(session_type)"
+DESKTOP="$(desktop)"
+
+# displays FUNCAO: roda uma funcao do gamemode-displays.sh na sessao do usuario
+displays() { as_user bash -c '. "$1"; "$2"' _ "$SRC/bin/gamemode-displays.sh" "$1"; }
 
 # Pergunta so com alguem do outro lado: terminal no stdin, ou GH_INTERACTIVE=1
 # (testes). --yes e --check nunca perguntam.
@@ -128,6 +149,110 @@ user_can_sudo() {
   if (( EUID == 0 )); then sudo -n -l -U "$TU" "$1" >/dev/null 2>&1
   else sudo -n -l "$1" >/dev/null 2>&1; fi
 }
+
+# --- desinstalacao ---------------------------------------------------------------
+# --uninstall desfaz o install: desliga os ajustes de um jogo ainda ativo, apaga
+# os scripts e a configuracao, devolve o gamemode.ini que existia antes e, com
+# sudo, tira o auxiliar de perfil e a regra do sudoers. O grupo gamemode e o
+# proprio GameMode ficam: podem ser usados sem os hooks.
+
+SUDOERS=/etc/sudoers.d/platform-profile
+
+# rmf ARQUIVO: apaga (em --check so diz que apagaria)
+rmf() {
+  if (( CHECK )); then echo "apagaria:   $1"
+  else rm -f -- "$1" && echo "apagado:    $1"; fi
+}
+
+uninstall() {
+  local f dst bak r pending=() backups=()
+
+  echo "Desinstalando os hooks do GameMode de $TU..."
+  echo
+
+  # Jogo (ou modo-jogo) ainda ativo: desfaz os ajustes antes de apagar quem os desfaz.
+  if as_user sh -c '[ -e "$XDG_RUNTIME_DIR/gamemode-tweaks.state" ]'; then
+    if (( CHECK )); then
+      echo "desfaria:   os ajustes ainda ativos (gamemode-end.sh)"
+    elif [[ -x "$BIN_DIR/gamemode-end.sh" ]]; then
+      as_user "$BIN_DIR/gamemode-end.sh" >/dev/null 2>&1
+      echo "desfeito:   os ajustes que estavam ativos (gamemode-end.sh)"
+    fi
+  fi
+
+  for f in "$SRC"/bin/*; do
+    dst="$BIN_DIR/${f##*/}"
+    [[ -e "$dst" ]] && rmf "$dst"
+  done
+
+  # gamemode.ini: so o que aponta para os hooks e nosso. Se havia um antes do
+  # install (o backup mais antigo que nao aponta para eles), ele volta.
+  if [[ -e "$CONF_DIR/gamemode.ini" ]]; then
+    if grep -q 'gamemode-start\.sh' "$CONF_DIR/gamemode.ini"; then
+      bak=$(ls -1 "$CONF_DIR"/gamemode.ini.bak-* 2>/dev/null | sort | head -1)
+      if [[ -n "$bak" ]] && ! grep -q 'gamemode-start\.sh' "$bak"; then
+        if (( CHECK )); then echo "voltaria:   $CONF_DIR/gamemode.ini  (de $bak)"
+        else mv -f -- "$bak" "$CONF_DIR/gamemode.ini" && echo "devolvido:  $CONF_DIR/gamemode.ini  (de $bak)"; fi
+      else
+        rmf "$CONF_DIR/gamemode.ini"
+      fi
+    else
+      echo "mantido:    $CONF_DIR/gamemode.ini  (nao chama os hooks)"
+    fi
+  fi
+
+  # A configuracao tem as escolhas da pessoa: pergunta (com --yes, apaga).
+  if [[ -e "$CONF" || -e "$CONF.detectado" ]]; then
+    if (( KEEP_CONF )); then
+      echo "mantido:    $CONF  (--keep-config)"
+    else
+      r=$(ask "apagar tambem a configuracao ($CONF)? [S/n]" s)
+      if [[ "$r" == [sSyY]* ]]; then
+        for f in "$CONF" "$CONF.detectado"; do [[ -e "$f" ]] && rmf "$f"; done
+      else
+        echo "mantido:    $CONF"
+      fi
+    fi
+  fi
+
+  # Backups que o install deixou dos nossos arquivos.
+  for f in "$SRC"/bin/*; do backups+=("$BIN_DIR/${f##*/}".bak-*); done
+  backups+=("$CONF_DIR"/gamemode.ini.bak-* "$CONF".bak-*)
+  mapfile -t backups < <(for f in "${backups[@]}"; do [[ -e "$f" ]] && echo "$f"; done)
+  if (( ${#backups[@]} )); then
+    if (( PURGE )); then
+      for f in "${backups[@]}"; do rmf "$f"; done
+    else
+      echo "mantidos:   ${#backups[@]} backup(s) .bak-*  (--purge apaga)"
+    fi
+  fi
+
+  # Parte do sistema: com sudo, apaga; sem, mostra o comando.
+  for f in "$HELPER" "$SUDOERS"; do
+    [[ -e "$f" ]] || continue
+    if (( EUID == 0 )); then rmf "$f"; else pending+=("sudo rm $f"); fi
+  done
+  [[ -e "$LEGACY_HELPER" ]] && \
+    note "(ficou o $LEGACY_HELPER, de antes deste instalador; apague a mao se nao usar)"
+
+  echo
+  if (( ${#pending[@]} )); then
+    echo "Falta a parte do sistema (rode voce mesmo):"
+    printf '  %s\n' "${pending[@]}"
+    echo
+  fi
+  if id -nG "$TU" | tr ' ' '\n' | grep -qx gamemode; then
+    echo "O grupo gamemode e o GameMode ficam (servem sem os hooks). Para tirar:"
+    echo "  sudo gpasswd -d $TU gamemode; sudo apt remove gamemode"
+  fi
+  echo "No terminal ja aberto, rode \"rehash\" (zsh) ou \"hash -r\" (bash) para o"
+  echo "shell esquecer o ~/.local/bin/gamemoderun e voltar ao do sistema."
+}
+
+if (( UNINSTALL )); then
+  uninstall
+  exit 0
+fi
 
 # --- deteccao ----------------------------------------------------------------
 
@@ -174,27 +299,28 @@ else
   note "NVIDIA: nao"
 fi
 
-# Monitores: so X11 com xrandr; com um monitor so, nao ha o que trocar.
+# Monitores: com a ferramenta da sessao (xrandr no X11; kscreen-doctor, gdctl
+# ou wlr-randr no Wayland); com um monitor so, nao ha o que trocar.
 SINGLE_MONITOR=0; GAME_MONITOR=""
-session="$(session_type)"
-if [[ "$session" == wayland ]]; then
-  note "sessao: Wayland - a troca de monitores (xrandr) fica desligada"
-elif command -v xrandr >/dev/null 2>&1 && as_user xrandr --query >/dev/null 2>&1; then
-  mapfile -t OUTS < <(as_user xrandr --query | awk '/ connected/{
-    r = ""; for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+/) { split($i, g, "+"); r = g[1]; break }
-    print $1 "|" (r == "" ? "desligado" : r) }')
-  note "sessao: X11, ${#OUTS[@]} monitor(es): $(printf '%s ' "${OUTS[@]%%|*}")"
+MON_TOOL=$(displays mon_backend)
+if [[ -n "$MON_TOOL" ]]; then
+  mapfile -t OUTS < <(displays mon_list)
+  note "sessao: $SESSION ($MON_TOOL), ${#OUTS[@]} monitor(es): $(printf '%s ' "${OUTS[@]%%|*}")"
   if (( ${#OUTS[@]} > 1 )); then
-    note "  durante o jogo, deixar so um monitor ligado (libera VRAM e evita"
-    note "  conflito de taxa de atualizacao)? qual?"
+    note "  monitor do jogo: ao abrir um jogo, o gamemoderun pergunta se ele roda"
+    note "  so nesse monitor (os outros desligam: libera VRAM e evita conflito de"
+    note "  taxa de atualizacao) ou em todos. qual monitor?"
     i=0; for o in "${OUTS[@]}"; do i=$((i + 1)); note "    $i) ${o%%|*} (${o#*|})"; done
-    note "    0) nao mexer nos monitores"
+    note "    0) nao mexer nos monitores (sem pergunta)"
     (( INTERACTIVE )) || note "  (sem pergunta - --yes, --check ou sem terminal: nao mexe nos monitores)"
     r=$(ask "  escolha [0]:" 0)
     if [[ "$r" =~ ^[0-9]+$ ]] && (( r >= 1 && r <= ${#OUTS[@]} )); then
       SINGLE_MONITOR=1; GAME_MONITOR="${OUTS[r-1]%%|*}"
     fi
   fi
+elif [[ "$SESSION" == wayland ]]; then
+  note "sessao: Wayland ($DESKTOP) sem kscreen-doctor (KDE), gdctl (GNOME 48+) ou"
+  note "  wlr-randr (wlroots) - a troca de monitores fica desligada"
 else
   note "sessao: sem xrandr - a troca de monitores fica desligada"
 fi
@@ -240,13 +366,18 @@ write_conf() {
 # Gerado por install.sh em $(date '+%Y-%m-%d %H:%M') a partir do hardware detectado.
 # Mude os valores e o efeito vale no proximo jogo, sem reiniciar nada.
 
-# Monitor onde o jogo roda: ele vira primario e os outros sao desligados (so
-# X11). Vazio = nao mexer nos monitores. Nomes: xrandr --query | grep connected
-# Para manter todos ligados num jogo so, use nas opcoes de inicializacao dele:
-#   GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%
+# Monitor onde o jogo roda: ele vira primario e os outros sao desligados. No
+# X11 com o xrandr; no Wayland com kscreen-doctor (KDE), gdctl (GNOME 48+) ou
+# wlr-randr (wlroots). Vazio = nao mexer nos monitores.
 GAME_MONITOR=$GAME_MONITOR
 SINGLE_MONITOR=$SINGLE_MONITOR
-# Taxa de atualizacao no monitor do jogo: "auto" usa a maior, ou fixe (ex.: 59.98).
+# Ao abrir o jogo, o gamemoderun pergunta em tela: so o GAME_MONITOR ou todos.
+# Sem resposta em ASK_TIMEOUT segundos, fica so o GAME_MONITOR. ASK_MONITOR=0
+# nao pergunta (sempre so ele). Para fixar a resposta num jogo, nas opcoes de
+# inicializacao dele: GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command% (todos).
+ASK_MONITOR=1
+ASK_TIMEOUT=15
+# Taxa de atualizacao no monitor do jogo (so X11): "auto" usa a maior, ou fixe (ex.: 59.98).
 GAME_REFRESH=auto
 
 # Perfil de energia da plataforma durante o jogo (um de
@@ -374,5 +505,5 @@ fi
 echo
 echo "No jogo (Steam > Propriedades > Opcoes de inicializacao): gamemoderun %command%"
 [[ "$SINGLE_MONITOR" == 1 ]] && \
-  echo "  (para manter os monitores ligados nesse jogo: GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%)"
+  echo "  (ao abrir o jogo, pergunta: so o $GAME_MONITOR ou todos os monitores)"
 echo "Teste do GameMode: gamemoded -t   (deve terminar em \"All Tests Passed\")"

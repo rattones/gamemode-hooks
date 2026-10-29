@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# kdialog falso: grava a chamada em MOCK_LOG; MOCK_DIALOG=single (sim), all
+# (nao) ou, sem nada, fica esperando (para o timeout cortar).
+[[ -n "${MOCK_LOG:-}" ]] && echo "kdialog $*" >> "$MOCK_LOG"
+case "${MOCK_DIALOG:-}" in
+  single) exit 0 ;;
+  all)    exit 1 ;;
+  *)      sleep 30 ;;
+esac

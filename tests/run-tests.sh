@@ -39,7 +39,9 @@ inst() {
   local h="$1"; shift
   mkdir -p "$h"
   HOME="$h" PATH="$MOCKS:$PATH" XDG_SESSION_TYPE="${SESSION:-x11}" GH_ALLOW_USER=1 \
+    XDG_CURRENT_DESKTOP="${DESK:-}" MOCK_WAYLAND="${WL:-}" \
     GH_ACPI_DIR="${ACPI:-$TMP/sem-acpi}" GH_INTERACTIVE="${INTER:-}" MOCK_LOG="$h.log" \
+    GH_RUNTIME_DIR="$h/run" \
     "$ROOT/install.sh" "$@" 2>&1
 }
 
@@ -58,7 +60,7 @@ eqv "monitores: escolhido o 1 (DP-1)"     "$(conf "$H" GAME_MONITOR)/$(conf "$H"
 eqv "servicos: pausa o escolhido"         "$(conf "$H" PAUSE_SERVICES)" '"lan.service"'
 has "lista os monitores com resolucao"    "$out" "1) DP-1 (2560x1440)"
 eqv "gamemode.ini com a home"             "$(grep -c "start = $H/.local/bin/gamemode-start.sh" "$H/.config/gamemode.ini")" "1"
-eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-end.sh gamemode-monitor.sh gamemode-start.sh gamemoderun modo-jogo "
+eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-displays.sh gamemode-end.sh gamemode-monitor.sh gamemode-start.sh gamemoderun modo-jogo "
 lacks "auxiliar liberado: nada de sudoers" "$out" "sudoers.d/platform-profile"
 
 # ===========================================================================
@@ -95,6 +97,19 @@ eqv "nvidia ausente: tudo desligado"      "$(conf "$H" SET_POWERMIZER)/$(conf "$
 eqv "sem platform_profile: desligado"     "$(conf "$H" SET_PLATFORM_PROFILE)" "0"
 eqv "wayland: nao mexe nos monitores"     "$(conf "$H" SINGLE_MONITOR)" "0"
 has "wayland: explica"                    "$out" "Wayland"
+lacks "wayland sem ferramenta: sem pergunta" "$out" "monitor do jogo"
+H="$TMP/h6k"
+out=$(SESSION=wayland WL=kde DESK=KDE INTER=1 inst "$H" <<< $'1\n')
+eqv "wayland KDE: escolhe o monitor"      "$(conf "$H" GAME_MONITOR)/$(conf "$H" SINGLE_MONITOR)" "DP-1/1"
+has "wayland KDE: diz a ferramenta"       "$out" "(kscreen-doctor), 2 monitor(es)"
+eqv "pergunta ao abrir: ligada"           "$(conf "$H" ASK_MONITOR)/$(conf "$H" ASK_TIMEOUT)" "1/15"
+H="$TMP/h6g"
+out=$(SESSION=wayland WL=gnome DESK=ubuntu:GNOME INTER=1 inst "$H" <<< $'2\n')
+eqv "wayland GNOME: escolhe o monitor"    "$(conf "$H" GAME_MONITOR)" "eDP-1"
+has "wayland GNOME: diz a ferramenta"     "$out" "(gdctl)"
+H="$TMP/h6w"
+out=$(SESSION=wayland WL=wlr DESK=sway INTER=1 inst "$H" <<< $'1\n')
+eqv "wayland wlroots: escolhe o monitor"  "$(conf "$H" GAME_MONITOR)" "DP-1"
 H="$TMP/h7"
 MOCK_NVSETTINGS=none inst "$H" --yes >/dev/null 2>&1
 eqv "sem nvidia-settings: so o alerta"    "$(conf "$H" SET_POWERMIZER)/$(conf "$H" NOTIFY_VRAM)" "0/1"
@@ -169,6 +184,7 @@ group "hooks: start e end com a configuracao gerada"
 runhook() {
   local h="$1" s="$2"
   HOME="$h" PATH="$MOCKS:$PATH" XDG_RUNTIME_DIR="$h/run" XDG_SESSION_TYPE="${SESSION:-x11}" \
+    XDG_CURRENT_DESKTOP="${DESK:-}" MOCK_WAYLAND="${WL:-}" \
     GH_ACPI_DIR="${ACPI:-$TMP/sem-acpi}" GH_PROC_DIR="${PROC:-$TMP/sem-proc}" \
     MOCK_LOG="$h/log" MOCK_SUDO_ALLOW="${ALLOW:-}" MOCK_VRAM_FREE="${VFREE:-7000}" MOCK_SERVICES="${SVCS:-}" \
     "$h/.local/bin/$s" >/dev/null 2>&1
@@ -221,13 +237,37 @@ lacks "VRAM folgada: sem alerta"          "$(cat "$H/log")" "VRAM livre baixa"
 lacks "sem monitor escolhido: nao mexe"   "$(cat "$H/log")" "--off"
 
 # ===========================================================================
+group "hooks: monitores no Wayland"
+# ===========================================================================
+H="$TMP/h1"; rm -f "$H/run/gamemode-tweaks.state"
+# wl DESKTOP FERRAMENTA "troca esperada" "volta esperada"
+wl() {
+  : > "$H/log"
+  SESSION=wayland WL="$2" DESK="$1" runhook "$H" gamemode-start.sh
+  has "$1: so o DP-1 ligado"              "$(cat "$H/log")" "$3"
+  : > "$H/log"
+  SESSION=wayland WL="$2" DESK="$1" runhook "$H" gamemode-end.sh
+  has "$1: volta o layout"                "$(cat "$H/log")" "$4"
+}
+wl KDE kde "kscreen-doctor output.DP-1.enable output.DP-1.position.0,0 output.DP-1.priority.1 output.eDP-1.disable" \
+  "kscreen-doctor output.DP-1.enable output.DP-1.mode.0 output.DP-1.position.0,0 output.DP-1.priority.1 output.eDP-1.enable output.eDP-1.mode.3 output.eDP-1.position.2560,0"
+wl GNOME gnome "gdctl set --logical-monitor --primary --scale 1.0 --monitor DP-1" \
+  "gdctl set --logical-monitor --primary --x 0 --y 0 --scale 1.0 --monitor DP-1 --mode 2560x1440@165.000 --logical-monitor --x 2560 --y 0 --scale 1.25 --monitor eDP-1 --mode 1920x1080@60.000"
+wl sway wlr "wlr-randr --output DP-1 --on --pos 0,0 --output eDP-1 --off" \
+  "wlr-randr --output DP-1 --on --mode 2560x1440@165.000000Hz --pos 0,0 --scale 1.000000 --output eDP-1 --on --mode 1920x1080@60.000000Hz --pos 2560,0 --scale 1.250000"
+: > "$H/log"
+SESSION=wayland DESK=X-Cinnamon runhook "$H" gamemode-start.sh
+lacks "Wayland sem ferramenta: nao mexe"  "$(cat "$H/log")" "--off"
+runhook "$H" gamemode-end.sh
+
+# ===========================================================================
 group "gamemoderun: --help e repasse ao do sistema"
 # ===========================================================================
 H="$TMP/h1"
 GMR="$H/.local/bin/gamemoderun"
 # um gamemoderun "do sistema" falso, depois deste no PATH
 mkdir -p "$TMP/sysgames"
-printf '#!/bin/sh\necho "real: $*"\n' > "$TMP/sysgames/gamemoderun"; chmod +x "$TMP/sysgames/gamemoderun"
+printf '#!/bin/sh\necho "real: $* [${GAMEMODE_SINGLE_MONITOR-}]"\n' > "$TMP/sysgames/gamemoderun"; chmod +x "$TMP/sysgames/gamemoderun"
 out=$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" --help 2>&1)
 has "--help: mostra o uso"                "$out" "gamemoderun %command%"
 has "--help: opcao por jogo"              "$out" "GAMEMODE_SINGLE_MONITOR=0"
@@ -238,8 +278,88 @@ eqv "-h igual a --help"                   "$(HOME="$H" PATH="$H/.local/bin:$TMP/
 out=$(HOME="$TMP/sem-home" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" 2>&1)
 has "sem argumentos: mostra o uso"        "$out" "uso: gamemoderun"
 has "sem configuracao: avisa"             "$out" "rode o install.sh"
-out=$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" ./jogo --help -x 2>&1)
-eqv "repassa tudo ao do sistema"          "$out" "real: ./jogo --help -x"
+# gmr [VAR=valor...] -- args: roda o gamemoderun como a Steam, com os mocks e uma sessao X11
+gmr() {
+  local envs=()
+  while [[ "$1" != -- ]]; do envs+=("$1"); shift; done; shift
+  mkdir -p "$TMP/gmr-run"; : > "$TMP/gmr.log"
+  env -u GAMEMODE_SINGLE_MONITOR HOME="$H" PATH="$H/.local/bin:$MOCKS:$TMP/sysgames:$PATH" DISPLAY=:0 \
+    XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=X-Cinnamon XDG_RUNTIME_DIR="$TMP/gmr-run" \
+    MOCK_LOG="$TMP/gmr.log" "${envs[@]}" "$GMR" "$@" 2>&1
+}
+eqv "repassa tudo ao do sistema"          "$(gmr MOCK_DIALOG=single -- ./jogo --help -x)" "real: ./jogo --help -x [1]"
+has "pergunta com o zenity"               "$(cat "$TMP/gmr.log")" "--extra-button=So o DP-1 --extra-button=Todos os monitores --timeout=15"
+eqv "resposta: todos os monitores"        "$(gmr MOCK_DIALOG=all -- jogo)" "real: jogo [0]"
+eqv "sem resposta: so o do jogo"          "$(gmr -- jogo)" "real: jogo [1]"
+eqv "janela fechada: so o do jogo"        "$(gmr MOCK_DIALOG=close -- jogo)" "real: jogo [1]"
+eqv "fixado no jogo: nao pergunta"        "$(gmr GAMEMODE_SINGLE_MONITOR=0 -- jogo)" "real: jogo [0]"
+eqv "fixado no jogo: sem dialogo"         "$(cat "$TMP/gmr.log")" ""
+gmr XDG_CURRENT_DESKTOP=KDE MOCK_DIALOG=all -- jogo >/dev/null
+has "KDE: pergunta com o kdialog"         "$(cat "$TMP/gmr.log")" "kdialog --title GameMode --yes-label So o DP-1"
+eqv "kdialog: resposta todos"             "$(gmr XDG_CURRENT_DESKTOP=KDE MOCK_DIALOG=all -- jogo)" "real: jogo [0]"
+sed -i 's/^ASK_TIMEOUT=.*/ASK_TIMEOUT=1/' "$H/.config/gamemode-tweaks.conf"
+eqv "kdialog sem resposta: so o do jogo"  "$(gmr XDG_CURRENT_DESKTOP=KDE -- jogo)" "real: jogo [1]"
+sed -i 's/^ASK_TIMEOUT=.*/ASK_TIMEOUT=15/' "$H/.config/gamemode-tweaks.conf"
+eqv "Wayland KDE: pergunta tambem"        "$(gmr XDG_SESSION_TYPE=wayland WAYLAND_DISPLAY=wayland-0 DISPLAY= XDG_CURRENT_DESKTOP=KDE MOCK_WAYLAND=kde MOCK_DIALOG=all -- jogo)" "real: jogo [0]"
+eqv "Wayland sem ferramenta: nao pergunta" "$(gmr XDG_SESSION_TYPE=wayland WAYLAND_DISPLAY=wayland-0 MOCK_DIALOG=all -- jogo)" "real: jogo []"
+eqv "sem tela: nao pergunta"              "$(gmr DISPLAY= MOCK_DIALOG=all -- jogo)" "real: jogo []"
+echo "APPLIED_MONITOR=1" > "$TMP/gmr-run/gamemode-tweaks.state"
+eqv "monitores ja trocados: nao pergunta" "$(gmr MOCK_DIALOG=all -- jogo)" "real: jogo []"
+rm -f "$TMP/gmr-run/gamemode-tweaks.state"
+sed -i 's/^ASK_MONITOR=.*/ASK_MONITOR=0/' "$H/.config/gamemode-tweaks.conf"
+eqv "ASK_MONITOR=0: nao pergunta"         "$(gmr MOCK_DIALOG=all -- jogo)" "real: jogo []"
+sed -i 's/^ASK_MONITOR=.*/ASK_MONITOR=1/' "$H/.config/gamemode-tweaks.conf"
+# Runtime da Steam antes no PATH: usa o zenity do sistema (o mock), nao o dela.
+mkdir -p "$TMP/steam-runtime/bin"; printf '#!/bin/sh\nexit 0\n' > "$TMP/steam-runtime/bin/zenity"; chmod +x "$TMP/steam-runtime/bin/zenity"
+eqv "pula o zenity do runtime da Steam"   "$(env PATH="$TMP/steam-runtime/bin:$H/.local/bin:$MOCKS:$TMP/sysgames:$PATH" \
+  HOME="$H" DISPLAY=:0 XDG_SESSION_TYPE=x11 XDG_RUNTIME_DIR="$TMP/gmr-run" MOCK_DIALOG=all "$GMR" jogo 2>&1)" "real: jogo [0]"
+
+# ===========================================================================
+group "desinstalacao"
+# ===========================================================================
+# uninst HOME [opcoes...]: roda o uninstall.sh com hardware falso
+uninst() {
+  local h="$1"; shift
+  HOME="$h" PATH="$MOCKS:$PATH" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1 GH_ACPI_DIR="$TMP/sem-acpi" \
+    GH_INTERACTIVE="${INTER:-}" MOCK_LOG="$h.log" GH_RUNTIME_DIR="$h/run" \
+    "$ROOT/uninstall.sh" "$@" 2>&1
+}
+H="$TMP/u1"
+mkdir -p "$H/.config"; echo "[general]" > "$H/.config/gamemode.ini"   # o de antes do install
+inst "$H" --yes >/dev/null 2>&1 < /dev/null
+inst "$H" --yes >/dev/null 2>&1 < /dev/null                          # sem mudanca: sem backup novo
+mkdir -p "$H/run"; echo "PAUSED_SERVICES=lan.service" > "$H/run/gamemode-tweaks.state"
+out=$(uninst "$H" --check)
+has "--check: diz o que apagaria"         "$out" "apagaria:   $H/.local/bin/gamemoderun"
+eqv "--check: nao apaga nada"             "$(ls "$H/.local/bin" | wc -l)" "6"
+eqv "--check: nao desfaz o jogo ativo"    "$([[ -e "$H/run/gamemode-tweaks.state" ]] && echo sim)" "sim"
+out=$(uninst "$H" --yes)
+eqv "apaga os scripts"                    "$(ls "$H/.local/bin" | wc -l)" "0"
+eqv "devolve o gamemode.ini de antes"     "$(cat "$H/.config/gamemode.ini")" "[general]"
+eqv "apaga a configuracao"                "$([[ -e "$H/.config/gamemode-tweaks.conf" ]] && echo sim)" ""
+eqv "desfaz o jogo ativo"                 "$([[ -e "$H/run/gamemode-tweaks.state" ]] && echo sim)" ""
+has "religa o servico pausado"            "$(cat "$H.log")" "start lan.service"
+has "lembra do rehash"                    "$out" "rehash"
+
+H="$TMP/u2"
+inst "$H" --yes >/dev/null 2>&1 < /dev/null
+echo "x" > "$H/.local/bin/modo-jogo.bak-1"
+out=$(uninst "$H" --yes --keep-config)
+eqv "--keep-config: mantem a configuracao" "$([[ -e "$H/.config/gamemode-tweaks.conf" ]] && echo sim)" "sim"
+eqv "sem gamemode.ini de antes: apaga"    "$([[ -e "$H/.config/gamemode.ini" ]] && echo sim)" ""
+has "mantem os backups sem --purge"       "$out" "1 backup(s)"
+uninst "$H" --yes --purge >/dev/null
+eqv "--purge: apaga os backups"           "$(ls -A "$H/.local/bin")" ""
+
+H="$TMP/u3"
+inst "$H" --yes >/dev/null 2>&1 < /dev/null
+INTER=1 uninst "$H" <<< "n" >/dev/null
+eqv "pergunta: 'n' mantem a configuracao" "$([[ -e "$H/.config/gamemode-tweaks.conf" ]] && echo sim)" "sim"
+
+H="$TMP/u4"; mkdir -p "$H/.config"
+printf '[general]\nrenice=5\n' > "$H/.config/gamemode.ini"
+out=$(uninst "$H" --yes)
+has "gamemode.ini que nao e dos hooks: mantem" "$out" "nao chama os hooks"
 
 # ===========================================================================
 group "system/platform-profile"

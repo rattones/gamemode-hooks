@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Executado pelo GameMode ao iniciar um jogo.
 # Poe o jogo no monitor escolhido, desliga os demais e destrava energia. Cada
-# ajuste depende de um recurso (platform_profile, NVIDIA, X11) e e pulado quando
+# ajuste depende de um recurso (platform_profile, NVIDIA, a ferramenta de
+# monitores da sessao: xrandr ou, no Wayland, kscreen-doctor/gdctl/wlr-randr) e e pulado quando
 # ele nao existe; as opcoes vem de ~/.config/gamemode-tweaks.conf, gerado pelo
 # install.sh a partir do hardware detectado.
 set -u
@@ -44,6 +45,7 @@ STATE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state"
 # curtos de inspecao). Se ja capturamos o estado original, preservamos aquele
 # valor -- reler agora devolveria o valor JA modificado e perderiamos o original.
 PREV_PROFILE=""; PREV_PM=""; RESTORE_CMD=""; APPLIED_MONITOR=""; PAUSED_SERVICES=""; PREV_HELPER=""
+MON_BACKEND=""; MON_WAYLAND_DISPLAY=""
 # shellcheck disable=SC1090
 [ -r "$STATE" ] && . "$STATE"
 
@@ -55,6 +57,8 @@ save_state() {
     [ -n "$APPLIED_MONITOR" ] && echo "APPLIED_MONITOR=$APPLIED_MONITOR" >> "$STATE"
     [ -n "$PAUSED_SERVICES" ] && printf 'PAUSED_SERVICES=%q\n' "$PAUSED_SERVICES" >> "$STATE"
     [ -n "$PREV_HELPER" ]    && printf 'PREV_HELPER=%q\n' "$PREV_HELPER" >> "$STATE"
+    [ -n "$MON_BACKEND" ]    && echo "MON_BACKEND=$MON_BACKEND"       >> "$STATE"
+    [ -n "$MON_WAYLAND_DISPLAY" ] && printf 'MON_WAYLAND_DISPLAY=%q\n' "$MON_WAYLAND_DISPLAY" >> "$STATE"
     return 0
 }
 
@@ -77,39 +81,9 @@ game_env() {
     done
 }
 
-# Monta o comando xrandr que reproduz o layout atual, para o end.sh desfazer.
-capture_layout() {
-    xrandr --query | awk '
-    function flush(  s) {
-        if (out == "") return
-        if (geo != "") {
-            split(geo, g, "+"); s = " --output " out " --mode " g[1] " --pos " g[2] "x" g[3]
-            if (rate != "") s = s " --rate " rate
-            if (prim) s = s " --primary"
-        } else { s = " --output " out " --off" }
-        cmd = cmd s; out = ""
-    }
-    / connected/ {
-        flush()
-        out = $1; prim = ($3 == "primary"); geo = ""; rate = ""
-        for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+[-0-9]+\+[-0-9]+$/) { geo = $i; break }
-        next
-    }
-    /^[ \t]+[0-9]+x[0-9]+/ {
-        if (out == "" || geo == "") next
-        for (i = 2; i <= NF; i++) if ($i ~ /\*/) { r = $i; gsub(/[*+]/, "", r); rate = r }
-        next
-    }
-    END { flush(); if (cmd != "") print "xrandr" cmd }'
-}
-
-best_mode() { xrandr --query | awk -v m="$1" '$1==m&&/ connected/{f=1;next} /^[A-Za-z]/{f=0} f&&/^[ \t]+[0-9]+x[0-9]+/{print $1; exit}'; }
-best_rate() {
-    xrandr --query | awk -v m="$1" -v md="$2" '
-    $1==m&&/ connected/{f=1;next} /^[A-Za-z]/{f=0}
-    f&&$1==md{for(i=2;i<=NF;i++){r=$i;gsub(/[*+]/,"",r); if(r+0>b) b=r+0}}
-    END{if(b>0) printf "%.2f", b}'
-}
+# Monitores no X11 e no Wayland (mon_backend, mon_capture, mon_apply...).
+# shellcheck source=gamemode-displays.sh
+. "${HOME}/.local/bin/gamemode-displays.sh"
 
 # --- Perfil de energia da plataforma (ACPI platform_profile) ---
 # Os nomes variam por fabricante (performance, balanced-performance, quiet...):
@@ -133,39 +107,41 @@ if [ "$SET_POWERMIZER" = 1 ] && command -v nvidia-settings >/dev/null 2>&1; then
     nvidia-settings -a '[gpu:0]/GPUPowerMizerMode=1' >/dev/null 2>&1 || PREV_PM=""
 fi
 
-# --- Opcao por jogo: "GAMEMODE_SINGLE_MONITOR=0 gamemoderun %command%" nas
-#     opcoes de inicializacao mantem todos os monitores ligados nesse jogo ---
+# --- Opcao por jogo: o gamemoderun pergunta, ao abrir o jogo, se ele roda so no
+#     GAME_MONITOR ou em todos, e passa a resposta em GAMEMODE_SINGLE_MONITOR
+#     (que tambem pode vir fixa nas opcoes de inicializacao do jogo) ---
 if [ "$SINGLE_MONITOR" = 1 ] && [ -n "$GAME_MONITOR" ] && [ "$APPLIED_MONITOR" != "1" ]; then
     override=$(game_env GAMEMODE_SINGLE_MONITOR)
     [ -n "$override" ] && SINGLE_MONITOR="$override"
 fi
 
 # --- Monitores: joga no GAME_MONITOR, desliga o resto ---
-# So no X11 (o xrandr nao controla saidas no Wayland) e so com um monitor
-# escolhido: sem GAME_MONITOR, o layout fica como esta.
-if [ "$SINGLE_MONITOR" = 1 ] && [ -n "$GAME_MONITOR" ] && [ "$APPLIED_MONITOR" != "1" ] \
-   && [ "${XDG_SESSION_TYPE:-x11}" != wayland ] \
-   && xrandr --query 2>/dev/null | grep -q "^${GAME_MONITOR} connected"; then
-    RESTORE_CMD=$(capture_layout)
-    if [ -n "$RESTORE_CMD" ]; then
-        mode=$(best_mode "$GAME_MONITOR")
-        if [ "$GAME_REFRESH" = auto ]; then rate=$(best_rate "$GAME_MONITOR" "$mode"); else rate="$GAME_REFRESH"; fi
-
-        args="--output $GAME_MONITOR --mode $mode --pos 0x0 --primary"
-        [ -n "$rate" ] && args="$args --rate $rate"
-        while read -r o; do
-            [ "$o" = "$GAME_MONITOR" ] || args="$args --output $o --off"
-        done < <(xrandr --query | awk '/ connected/{print $1}')
-
-        # shellcheck disable=SC2086
-        if xrandr $args 2>/dev/null; then
-            APPLIED_MONITOR=1
-        else
-            eval "$RESTORE_CMD" 2>/dev/null
-            RESTORE_CMD=""
-            notify -u critical "GameMode" "Nao consegui trocar os monitores; layout mantido."
+# Com a ferramenta da sessao (xrandr no X11; kscreen-doctor, gdctl ou wlr-randr
+# no Wayland) e so com um monitor escolhido: sem GAME_MONITOR, ou sem
+# ferramenta, o layout fica como esta. Nada muda sem antes ter como desfazer.
+if [ "$SINGLE_MONITOR" = 1 ] && [ -n "$GAME_MONITOR" ] && [ "$APPLIED_MONITOR" != "1" ]; then
+    # O gamemoded pode ter nascido sem as variaveis da sessao grafica: vem do jogo.
+    for v in XDG_SESSION_TYPE XDG_CURRENT_DESKTOP WAYLAND_DISPLAY; do
+        if [ -z "${!v:-}" ]; then
+            val=$(game_env "$v")
+            [ -n "$val" ] && export "$v=$val"
+        fi
+    done
+    MON_BACKEND=$(mon_backend)
+    if [ -n "$MON_BACKEND" ] && mon_connected "$GAME_MONITOR"; then
+        RESTORE_CMD=$(mon_capture)
+        if [ -n "$RESTORE_CMD" ]; then
+            if mon_apply "$GAME_MONITOR" "$GAME_REFRESH"; then
+                APPLIED_MONITOR=1
+                MON_WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}"
+            else
+                eval "$RESTORE_CMD" >/dev/null 2>&1
+                RESTORE_CMD=""
+                notify -u critical "GameMode" "Nao consegui trocar os monitores; layout mantido."
+            fi
         fi
     fi
+    [ "$APPLIED_MONITOR" = 1 ] || MON_BACKEND=""
 fi
 
 # --- Servicos de usuario que atrapalham o jogo (ex.: um speedtest periodico
@@ -191,7 +167,9 @@ if [ "$NOTIFY_VRAM" = 1 ] && command -v nvidia-smi >/dev/null 2>&1; then
     read -r free_mb total_mb < <(nvidia-smi --query-gpu=memory.free,memory.total \
         --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ',')
     prof=$(cat "$ACPI_DIR/platform_profile" 2>/dev/null || echo "-")
-    res=$(xrandr --query 2>/dev/null | awk '/ connected primary/{for(i=3;i<=NF;i++) if($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"+");print a[1];exit}}')
+    # Resolucao do primario (no wlroots, que nao tem primario, a do primeiro ligado).
+    res=$(mon_state 2>/dev/null | awk -F'|' '$2 == 1 && $7 == 1 {print $3; f = 1; exit}
+                                             $2 == 1 && r == "" {r = $3} END {if (!f) print r}')
     if [ -n "${free_mb:-}" ] && [ -n "${total_mb:-}" ] && [ "$total_mb" -gt 0 ] 2>/dev/null; then
         if [ $(( free_mb * 100 / total_mb )) -lt "$VRAM_WARN_PCT" ] 2>/dev/null; then
             notify -u critical "GameMode: VRAM livre baixa" \

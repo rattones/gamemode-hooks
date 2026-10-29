@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# kscreen-doctor falso (Plasma 6, com cores): DP-1 primario e eDP-1, como o
+# xrandr falso. So responde com MOCK_WAYLAND=kde; outras chamadas que nao -o
+# sao gravadas em MOCK_LOG.
+[[ "${MOCK_WAYLAND:-}" == kde ]] || exit 1
+if [[ "${1:-}" == -o ]]; then
+  e=$'\e'
+  cat <<OUT
+${e}[01;32mOutput: ${e}[0;0m1 DP-1 ${e}[01;32m
+	enabled
+	connected
+	priority 1
+	DisplayPort
+	Modes: ${e}[0;0m 0:${e}[01;32m2560x1440@165*!${e}[0;0m  1:2560x1440@60  2:1920x1080@60
+	Geometry: 0,0 2560x1440
+	Scale: 1
+${e}[01;32mOutput: ${e}[0;0m2 eDP-1 ${e}[01;32m
+	enabled
+	connected
+	priority 2
+	Panel
+	Modes: ${e}[0;0m 3:${e}[01;32m1920x1080@60*!${e}[0;0m  4:1920x1080@48
+	Geometry: 2560,0 1920x1080
+	Scale: 1
+${e}[01;32mOutput: ${e}[0;0m3 HDMI-A-1 ${e}[01;32m
+	disabled
+	disconnected
+OUT
+  exit 0
+fi
+[[ -n "${MOCK_LOG:-}" ]] && echo "kscreen-doctor $*" >> "$MOCK_LOG"
+exit 0

@@ -7,6 +7,7 @@ export LC_ALL=C
 
 STATE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state"
 PREV_PROFILE=""; PREV_PM=""; RESTORE_CMD=""; APPLIED_MONITOR=""; PAUSED_SERVICES=""; PREV_HELPER=""
+MON_BACKEND=""; MON_WAYLAND_DISPLAY=""
 # shellcheck disable=SC1090
 [ -r "$STATE" ] && . "$STATE"
 
@@ -24,14 +25,15 @@ if [ -n "$PREV_PM" ] && command -v nvidia-settings >/dev/null 2>&1; then
     nvidia-settings -a "[gpu:0]/GPUPowerMizerMode=${PREV_PM}" >/dev/null 2>&1
 fi
 
-# --- Layout de monitores, exatamente como estava ---
+# --- Layout de monitores, exatamente como estava, com a mesma ferramenta que o
+#     start usou (estado de versoes antigas nao tem MON_BACKEND: era o xrandr) ---
 if [ "$APPLIED_MONITOR" = "1" ] && [ -n "$RESTORE_CMD" ]; then
-    eval "$RESTORE_CMD" 2>/dev/null || {
-        # Rede de seguranca: se o restore falhar, religa tudo no automatico
-        for o in $(xrandr --query | awk '/ connected/{print $1}'); do
-            xrandr --output "$o" --auto 2>/dev/null
-        done
-    }
+    # shellcheck source=gamemode-displays.sh
+    . "${HOME}/.local/bin/gamemode-displays.sh"
+    MON_BACKEND="${MON_BACKEND:-xrandr}"
+    [ -z "${WAYLAND_DISPLAY:-}" ] && [ -n "$MON_WAYLAND_DISPLAY" ] && export WAYLAND_DISPLAY="$MON_WAYLAND_DISPLAY"
+    # Rede de seguranca: se o restore falhar, religa tudo no automatico
+    eval "$RESTORE_CMD" >/dev/null 2>&1 || mon_fallback
 fi
 
 # --- Religa os servicos pausados pelo start.sh ---
