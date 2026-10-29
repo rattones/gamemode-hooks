@@ -3,10 +3,13 @@
 *[English](README.en.md)*
 
 Scripts que o [GameMode](https://github.com/FeralInteractive/gamemode) roda ao
-abrir e fechar um jogo iniciado com `gamemoderun %command%`. O `gamemoderun` em
-si é do sistema (`/usr/games/gamemoderun`); aqui ficam os ajustes extras e a
-coleta de dados. Cada ajuste depende de um recurso e é pulado onde ele não
-existe, e o instalador detecta o hardware para gerar a configuração.
+abrir e fechar um jogo iniciado com `gamemoderun %command%`: ajustes extras de
+energia, GPU, monitores e serviços, e coleta de dados. O `gamemoderun` do
+sistema (`/usr/games/gamemoderun`) continua sendo quem liga o GameMode; o deste
+repositório, em `~/.local/bin`, vem antes no PATH e só acrescenta o `--help` e
+a pergunta dos monitores ao abrir o jogo. Cada ajuste depende de um recurso e é
+pulado onde ele não existe, e o instalador detecta o hardware para gerar a
+configuração.
 
 ## O que acontece quando o jogo abre e fecha
 
@@ -14,7 +17,7 @@ existe, e o instalador detecta o hardware para gerar a configuração.
 |---|---|---|
 | perfil de energia da plataforma no modo de desempenho | volta ao perfil anterior | notebook com ACPI `platform_profile` |
 | PowerMizer da NVIDIA em "máximo desempenho" | volta ao modo anterior | NVIDIA com `nvidia-settings` |
-| pergunta em tela: só o monitor do jogo ou todos; no primeiro caso, os outros desligam (no X11, na maior taxa de atualização) | restaura o layout exato de antes | mais de um monitor; X11 com `xrandr` ou Wayland com `kscreen-doctor` (KDE), `gdctl` (GNOME 48+) ou `wlr-randr` (wlroots) |
+| só o monitor do jogo ligado ou todos, conforme a resposta à pergunta do `gamemoderun`; os outros desligam (no X11, na maior taxa de atualização) | restaura o layout exato de antes | mais de um monitor; X11 com `xrandr` ou Wayland com `kscreen-doctor` (KDE), `gdctl` (GNOME 48+) ou `wlr-randr` (wlroots) |
 | pausa os serviços de usuário escolhidos | religa só os que pausou | systemd de usuário |
 | inicia a coleta do [monitor](https://github.com/rattones/monitor) no PID do jogo | encerra a coleta | `monitor` instalado |
 | notificação com a VRAM livre, alerta abaixo de 78% | notificação de que tudo foi restaurado | `nvidia-smi` |
@@ -74,6 +77,11 @@ antes de rodar:
 Depois, `gamemoded -t` deve terminar em "All Tests Passed". No jogo (Steam →
 Propriedades → Opções de inicialização): `gamemoderun %command%`.
 
+Para atualizar, basta rodar o `sudo ./install.sh` de novo: os scripts são
+trocados e a sua configuração fica (as opções novas que faltarem nela valem com
+o padrão). Num terminal que já estava aberto, rode `rehash` (zsh) ou `hash -r`
+(bash) para o shell achar o `gamemoderun` de `~/.local/bin`.
+
 ### Um ou todos os monitores, na hora
 
 Com um monitor do jogo escolhido, cada jogo aberto pelo `gamemoderun` começa
@@ -104,6 +112,29 @@ ficam como estão.
 
 Para ver como iniciar os jogos, as opções por jogo e o que está ligado nesta
 máquina: `gamemoderun --help` (ou `-h`).
+
+## Configuração
+
+As opções ficam em `~/.config/gamemode-tweaks.conf`, gerado pelo instalador e
+comentado. Uma mudança vale no próximo jogo, sem reiniciar nada.
+
+| Opção | Padrão | O que faz |
+|---|---|---|
+| `GAME_MONITOR` | (detectado) | monitor onde o jogo roda; vazio = não mexer nos monitores |
+| `SINGLE_MONITOR` | `1` com monitor escolhido | deixa só o `GAME_MONITOR` ligado durante o jogo |
+| `ASK_MONITOR` | `1` | pergunta ao abrir o jogo: só o `GAME_MONITOR` ou todos; `0` = não pergunta |
+| `ASK_TIMEOUT` | `15` | segundos até a pergunta ficar no padrão (só o `GAME_MONITOR`) |
+| `GAME_REFRESH` | `auto` | taxa no monitor do jogo (só X11): `auto` = a maior, ou um valor como `59.98` |
+| `SET_PLATFORM_PROFILE` | (detectado) | troca o perfil de energia da plataforma durante o jogo |
+| `PERF_PROFILE` | `performance` | perfil usado, um dos de `platform_profile_choices` |
+| `PROFILE_HELPER` | (detectado) | quem grava o perfil como root, via `sudo -n` |
+| `SET_POWERMIZER` | (detectado) | PowerMizer da NVIDIA em "máximo desempenho" |
+| `NOTIFY_VRAM` / `VRAM_WARN_PCT` | (detectado) / `78` | alerta quando a VRAM livre fica abaixo dessa % da total |
+| `PAUSE_SERVICES` | (vazio) | serviços de usuário pausados durante o jogo, separados por espaço |
+| `RUN_MONITOR` / `MONITOR_BIN` | (detectado) | coleta com o [monitor](https://github.com/rattones/monitor) e onde ele está |
+| `MONITOR_MIN_RSS_MB` / `MONITOR_WAIT_S` | `300` / `180` | o jogo é o processo de maior RSS; espera ele passar desse tamanho ou desse tempo |
+| `MONITOR_ARGS` | `-q` | opções extras do monitor (ex.: `-q -i 1000`) |
+| `MONITOR_PERF` | `auto` | `perf` junto (`monitor -P`): `auto` = quando liberado, `1` = sempre, `0` = nunca |
 
 ## Desinstalar
 
@@ -157,6 +188,13 @@ mesmo que `sudo ./install.sh --uninstall`.
   start com `nvidia-settings`.
 - Instalações anteriores usavam `/usr/local/bin/legion-profile`; os hooks e o
   instalador continuam aceitando esse nome quando ele está liberado no sudoers.
+- A Steam põe o próprio runtime (com um `zenity` antigo e as bibliotecas dela)
+  no começo do PATH dos jogos. A pergunta dos monitores usa o `zenity` do
+  sistema e roda sem o `LD_PRELOAD` e o `LD_LIBRARY_PATH` da Steam.
+- A pergunta só aparece em jogos abertos pelo `gamemoderun` deste repositório.
+  Um launcher que liga o GameMode por conta própria (sem chamar o
+  `gamemoderun` do PATH) não passa por ela: ali vale o padrão, só o monitor do
+  jogo, ou o `GAMEMODE_SINGLE_MONITOR` das opções do jogo.
 - As travadas de ~3 s no Dota 2 que motivaram a coleta não eram destes ajustes:
   eram o TSC do CPU 0 atrasado pelo BIOS. Ver
   [ValveSoftware/Dota-2#3558](https://github.com/ValveSoftware/Dota-2/issues/3558).
