@@ -5,6 +5,10 @@
 #   gamemode-monitor.sh start   # descobre o PID do jogo e coleta ate ele sair
 #   gamemode-monitor.sh stop    # encerra a coleta (o monitor fecha os CSVs)
 #
+# Junto com o monitor, grava o ping ate o roteador a cada segundo em
+# <jogo>-<data>-ping.csv, para o gamemode-travadas separar travada do PC, do
+# Wi-Fi e do servidor.
+#
 # O GameMode nao passa o PID para os scripts custom, entao ele vem do D-Bus
 # (ListGames). Com "gamemoderun %command%" o LD_PRELOAD registra tambem os
 # wrappers da Steam (reaper, pressure-vessel...), e no Proton o jogo e filho
@@ -22,6 +26,7 @@ CONF="${HOME}/.config/gamemode-tweaks.conf"
 : "${MONITOR_WAIT_S:=180}"
 : "${MONITOR_ARGS:=-q}"
 : "${MONITOR_PERF:=auto}"
+: "${MONITOR_PING:=auto}"
 
 # Onde esta o monitor: o da configuracao (o install.sh grava o que achou), o de
 # ~/.local/bin (instalacao padrao) ou o do PATH (instalacao --system).
@@ -31,6 +36,8 @@ if [ -z "${MONITOR_BIN:-}" ] || [ ! -x "$MONITOR_BIN" ]; then
 fi
 LOG_DIR="${MONITOR_LOG_DIR:-$HOME/.monitor/log}"
 PIDFILE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-monitor.pid"
+# CSV da coleta em andamento (o gamemode-travadas marca as travadas ao lado dele).
+CURRENT="${XDG_RUNTIME_DIR:-/tmp}/gamemode-monitor.current"
 
 notify() { command -v notify-send >/dev/null 2>&1 && notify-send -a GameMode "$@"; }
 
@@ -63,6 +70,31 @@ biggest_game_proc() {
     }'
 }
 
+# Roteador da rota padrao: o primeiro salto, que so depende do Wi-Fi (ou do cabo).
+default_gateway() {
+    ip -4 route show default 2>/dev/null \
+        | awk '{for (i = 1; i < NF; i++) if ($i == "via") {print $(i + 1); exit}}'
+}
+
+# Le a saida de "ping -D -O" e escreve o CSV: timestamp,target,rtt_ms,lost.
+# O timestamp segue o formato dos CSVs do monitor (hora local, com ms).
+ping_csv() {
+    local target="$1" line ep sec ms ts rtt
+    echo "timestamp,target,rtt_ms,lost"
+    while IFS= read -r line; do
+        [[ "$line" == '['* ]] || continue
+        ep=${line#\[}; ep=${ep%%\]*}
+        sec=${ep%.*}; ms=${ep#*.}000; ms=${ms:0:3}
+        printf -v ts '%(%Y-%m-%dT%H:%M:%S)T' "$sec"
+        if [[ "$line" == *' time='* ]]; then
+            rtt=${line##* time=}; rtt=${rtt%% *}
+            echo "$ts.$ms,$target,$rtt,0"
+        elif [[ "$line" == *'no answer yet'* ]]; then
+            echo "$ts.$ms,$target,,1"
+        fi
+    done
+}
+
 stop_monitor() {
     [ -r "$PIDFILE" ] || return 0
     local wpid
@@ -75,11 +107,12 @@ stop_monitor() {
 }
 
 watch() {
-    local mon_pid="" game_pid="" found line rss_kib comm name out
+    local mon_pid="" ping_pid="" game_pid="" found line rss_kib comm name out target
 
     on_term() {
+        [ -n "$ping_pid" ] && kill -TERM "$ping_pid" 2>/dev/null
         [ -n "$mon_pid" ] && kill -TERM "$mon_pid" 2>/dev/null && wait "$mon_pid" 2>/dev/null
-        rm -f "$PIDFILE"
+        rm -f "$PIDFILE" "$CURRENT"
         exit 0
     }
     trap on_term TERM INT
@@ -121,7 +154,18 @@ watch() {
     "$MONITOR_BIN" all -f "pid:$game_pid" -o "$out" $MONITOR_ARGS $perf_arg \
         > "${out%.csv}.log" 2>&1 &
     mon_pid=$!
-    notify "Monitor ligado" "$comm (PID $game_pid)
+    echo "$out" > "$CURRENT"
+
+    # Ping ate o roteador (ou ate MONITOR_PING), 1 por segundo; -O registra
+    # tambem os que nao voltaram. Matar o ping fecha o CSV.
+    target="$MONITOR_PING"
+    [ "$target" = auto ] && target=$(default_gateway)
+    if [ -n "$target" ] && [ "$target" != 0 ] && command -v ping >/dev/null 2>&1; then
+        ping -n -D -O -i 1 -W 1 "$target" 2>/dev/null \
+            > >(ping_csv "$target" > "${out%.csv}-ping.csv") &
+        ping_pid=$!
+    fi
+    notify "Monitor ligado" "$comm (PID $game_pid)${ping_pid:+, ping ate $target}
 ${out}"
 
     # Coleta enquanto o jogo e o monitor estiverem vivos.
@@ -151,6 +195,10 @@ case "${1:-}" in
         ;;
     stop)
         stop_monitor
+        ;;
+    __ping_csv)
+        # So para os testes: converte a saida do ping lida da entrada.
+        ping_csv "${2:-?}"
         ;;
     *)
         echo "uso: ${0##*/} start|stop" >&2; exit 2 ;;
