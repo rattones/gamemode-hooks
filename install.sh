@@ -20,6 +20,7 @@
 #   - placa NVIDIA (nvidia-smi, nvidia-settings): PowerMizer e alerta de VRAM
 #   - sessao X11 ou Wayland e monitores conectados (xrandr; no Wayland,
 #     kscreen-doctor, gdctl ou wlr-randr)
+#   - placa Wi-Fi (e o iw ou iwconfig): economia de energia desligada no jogo
 #   - o monitor (github.com/rattones/monitor), para coletar dados do jogo
 #
 # O que e duvida vira pergunta: qual monitor usar no jogo quando ha mais de um,
@@ -27,7 +28,7 @@
 # servicos pausar durante o jogo. Com --yes (ou sem terminal), o que e duvida
 # fica desligado.
 #
-# O auxiliar platform-profile e a regra do sudoers so sao mostrados: os comandos
+# Os auxiliares platform-profile e wifi-powersave e as regras do sudoers so sao mostrados: os comandos
 # ficam para voce conferir e rodar. Arquivo que ja existe e e diferente vira
 # <arquivo>.bak-<data> antes de ser trocado.
 
@@ -37,8 +38,11 @@ SRC="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 # Raiz do ACPI no sysfs (so os testes trocam).
 ACPI_DIR="${GH_ACPI_DIR:-/sys/firmware/acpi}"
+# Interfaces de rede no sysfs (so os testes trocam).
+NET_DIR="${GH_NET_DIR:-/sys/class/net}"
 HELPER=/usr/local/bin/platform-profile
 LEGACY_HELPER=/usr/local/bin/legion-profile
+WIFI_HELPER=/usr/local/bin/wifi-powersave
 
 ARGS=("$@")
 CHECK=0; YES=0; RECONF=0; UNINSTALL=0; KEEP_CONF=0; PURGE=0
@@ -157,6 +161,7 @@ user_can_sudo() {
 # proprio GameMode ficam: podem ser usados sem os hooks.
 
 SUDOERS=/etc/sudoers.d/platform-profile
+WIFI_SUDOERS=/etc/sudoers.d/wifi-powersave
 
 # rmf ARQUIVO: apaga (em --check so diz que apagaria)
 rmf() {
@@ -228,7 +233,7 @@ uninstall() {
   fi
 
   # Parte do sistema: com sudo, apaga; sem, mostra o comando.
-  for f in "$HELPER" "$SUDOERS"; do
+  for f in "$HELPER" "$SUDOERS" "$WIFI_HELPER" "$WIFI_SUDOERS"; do
     [[ -e "$f" ]] || continue
     if (( EUID == 0 )); then rmf "$f"; else pending+=("sudo rm $f"); fi
   done
@@ -325,6 +330,29 @@ else
   note "sessao: sem xrandr - a troca de monitores fica desligada"
 fi
 
+# Wi-Fi: a economia de energia da placa da picos de latencia no jogo online.
+# Com mais de uma placa, fica a que esta conectada (operstate up), senao a primeira.
+SET_WIFI_POWERSAVE=0; WIFI_IFACE=""; WIFI_SUDO=0
+for d in "$NET_DIR"/*; do
+  [[ -d "$d/wireless" || -e "$d/phy80211" ]] || continue
+  [[ -z "$WIFI_IFACE" || "$(cat "$d/operstate" 2>/dev/null)" == up ]] || continue
+  WIFI_IFACE="${d##*/}"
+  [[ "$(cat "$d/operstate" 2>/dev/null)" == up ]] && break
+done
+if [[ -n "$WIFI_IFACE" ]]; then
+  if PATH="$PATH:/usr/sbin:/sbin" command -v iw >/dev/null 2>&1 \
+     || PATH="$PATH:/usr/sbin:/sbin" command -v iwconfig >/dev/null 2>&1; then
+    SET_WIFI_POWERSAVE=1
+    note "Wi-Fi: $WIFI_IFACE - economia de energia desligada durante o jogo"
+    user_can_sudo "$WIFI_HELPER" && WIFI_SUDO=1
+  else
+    note "Wi-Fi: $WIFI_IFACE, mas sem iw nem iwconfig - economia de energia fica como esta"
+    note "  (sudo apt install iw e rode o install.sh de novo)"
+  fi
+else
+  note "Wi-Fi: nao"
+fi
+
 # Coleta com o monitor: so se ele estiver instalado. A busca roda como o
 # usuario (e quem vai executa-lo, pelo hook) e olha o ~/.local/bin dele e o PATH,
 # o que cobre a instalacao padrao do monitor e a --system (/usr/local/bin).
@@ -392,6 +420,12 @@ PROFILE_HELPER=$PROFILE_HELPER
 SET_POWERMIZER=$SET_POWERMIZER
 NOTIFY_VRAM=$NOTIFY_VRAM
 VRAM_WARN_PCT=78
+
+# Economia de energia da placa Wi-Fi desligada durante o jogo (menos picos de
+# latencia online) e religada no fim, se estava ligada. Via o auxiliar
+# $WIFI_HELPER (sudo -n). Vazio = sem Wi-Fi.
+SET_WIFI_POWERSAVE=$SET_WIFI_POWERSAVE
+WIFI_IFACE=$WIFI_IFACE
 
 # Servicos de usuario (systemctl --user) pausados durante o jogo, separados por
 # espaco, e religados no fim. Vazio = nenhum.
@@ -491,6 +525,11 @@ if (( SET_PLATFORM_PROFILE )) && [[ -z "$PROFILE_HELPER" ]]; then
   pending+=("sudo install -o root -g root -m 0755 '$SRC/system/platform-profile' $HELPER")
   pending+=("sed \"s/@USER@/$TU/\" '$SRC/system/sudoers-platform-profile' | sudo tee /etc/sudoers.d/platform-profile >/dev/null")
   pending+=("sudo chmod 0440 /etc/sudoers.d/platform-profile && sudo visudo -cf /etc/sudoers.d/platform-profile")
+fi
+if (( SET_WIFI_POWERSAVE && ! WIFI_SUDO )); then
+  pending+=("sudo install -o root -g root -m 0755 '$SRC/system/wifi-powersave' $WIFI_HELPER")
+  pending+=("sed \"s/@USER@/$TU/\" '$SRC/system/sudoers-wifi-powersave' | sudo tee $WIFI_SUDOERS >/dev/null")
+  pending+=("sudo chmod 0440 $WIFI_SUDOERS && sudo visudo -cf $WIFI_SUDOERS")
 fi
 
 echo

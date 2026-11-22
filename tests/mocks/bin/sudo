@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # sudo falso, nunca vira root. "-n -l CMD" responde se CMD esta em MOCK_SUDO_ALLOW
 # (separados por espaco); "-n CMD ARGS" so grava "sudo CMD ARGS" em MOCK_LOG.
+# "wifi-powersave IFACE get" liberado responde MOCK_WIFI_PS (padrao: on).
 [[ "${1:-}" == -n ]] && shift
 if [[ "${1:-}" == -l ]]; then
   [[ " ${MOCK_SUDO_ALLOW:-} " == *" ${2:-} "* ]] && exit 0 || exit 1
 fi
 [[ -n "${MOCK_LOG:-}" ]] && echo "sudo $*" >> "$MOCK_LOG"
-[[ " ${MOCK_SUDO_ALLOW:-} " == *" ${1:-} "* ]] && exit 0 || exit 1
+[[ " ${MOCK_SUDO_ALLOW:-} " == *" ${1:-} "* ]] || exit 1
+[[ "${1##*/}" == wifi-powersave && "${3:-}" == get ]] && echo "${MOCK_WIFI_PS:-on}"
+exit 0

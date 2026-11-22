@@ -4,7 +4,8 @@
 #
 # Cada teste roda numa HOME temporaria, com o PATH apontando primeiro para
 # tests/mocks/bin (xrandr, nvidia-smi, nvidia-settings, sudo, systemctl,
-# notify-send falsos) e um platform_profile falso via GH_ACPI_DIR. Nada aqui
+# notify-send falsos), um platform_profile falso via GH_ACPI_DIR e placas de
+# rede falsas via GH_NET_DIR. Nada aqui
 # toca a configuracao real, o sysfs ou o sudo de verdade.
 #
 # Uso: ./tests/run-tests.sh [-v]
@@ -33,6 +34,11 @@ group(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 # acpi DIR "escolhas" "atual": cria um platform_profile falso
 acpi() { mkdir -p "$1"; echo "$2" > "$1/platform_profile_choices"; echo "$3" > "$1/platform_profile"; }
+# netif DIR NOME tipo(wifi|eth) estado: cria uma interface de rede falsa
+netif() { mkdir -p "$1/$2"; [[ "$3" == wifi ]] && mkdir -p "$1/$2/wireless"; echo "$4" > "$1/$2/operstate"; }
+netif "$TMP/net1" eth0 eth up
+netif "$TMP/net1" wlan0 wifi down
+netif "$TMP/net1" wlan1 wifi up
 
 # inst HOME [opcoes...] <<< respostas: roda o install.sh com hardware falso
 inst() {
@@ -41,7 +47,7 @@ inst() {
   HOME="$h" PATH="$MOCKS:$PATH" XDG_SESSION_TYPE="${SESSION:-x11}" GH_ALLOW_USER=1 \
     XDG_CURRENT_DESKTOP="${DESK:-}" MOCK_WAYLAND="${WL:-}" \
     GH_ACPI_DIR="${ACPI:-$TMP/sem-acpi}" GH_INTERACTIVE="${INTER:-}" MOCK_LOG="$h.log" \
-    GH_RUNTIME_DIR="$h/run" \
+    GH_RUNTIME_DIR="$h/run" GH_NET_DIR="${NET:-$TMP/sem-net}" MOCK_SUDO_ALLOW="${MOCK_SUDO_ALLOW:-}" \
     "$ROOT/install.sh" "$@" 2>&1
 }
 
@@ -51,8 +57,8 @@ group "deteccao: notebook NVIDIA, X11, dois monitores, com performance"
 acpi "$TMP/acpi1" "low-power balanced performance" balanced
 H="$TMP/h1"
 # respostas: monitor 1 (DP-1); pausar lan.service
-out=$(ACPI="$TMP/acpi1" INTER=1 MOCK_SERVICES="lan.service pipewire.service" \
-      MOCK_SUDO_ALLOW="/usr/local/bin/platform-profile" inst "$H" <<< $'1\nlan.service')
+out=$(ACPI="$TMP/acpi1" NET="$TMP/net1" INTER=1 MOCK_SERVICES="lan.service pipewire.service" \
+      MOCK_SUDO_ALLOW="/usr/local/bin/platform-profile /usr/local/bin/wifi-powersave" inst "$H" <<< $'1\nlan.service')
 eqv "perfil: liga com performance"        "$(conf "$H" SET_PLATFORM_PROFILE)/$(conf "$H" PERF_PROFILE)" "1/performance"
 eqv "perfil: usa o auxiliar liberado"     "$(conf "$H" PROFILE_HELPER)" "/usr/local/bin/platform-profile"
 eqv "nvidia: powermizer e alerta"         "$(conf "$H" SET_POWERMIZER)/$(conf "$H" NOTIFY_VRAM)" "1/1"
@@ -62,6 +68,8 @@ has "lista os monitores com resolucao"    "$out" "1) DP-1 (2560x1440)"
 eqv "gamemode.ini com a home"             "$(grep -c "start = $H/.local/bin/gamemode-start.sh" "$H/.config/gamemode.ini")" "1"
 eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-displays.sh gamemode-end.sh gamemode-monitor.sh gamemode-start.sh gamemoderun modo-jogo "
 lacks "auxiliar liberado: nada de sudoers" "$out" "sudoers.d/platform-profile"
+eqv "wifi: liga na placa conectada"       "$(conf "$H" SET_WIFI_POWERSAVE)/$(conf "$H" WIFI_IFACE)" "1/wlan1"
+lacks "wifi liberado: nada de sudoers"    "$out" "sudoers.d/wifi-powersave"
 
 # ===========================================================================
 group "--yes: o que e duvida fica desligado"
@@ -73,6 +81,12 @@ eqv "servicos: nenhum"                    "$(conf "$H" PAUSE_SERVICES)" '""'
 eqv "perfil com performance: aplica"      "$(conf "$H" SET_PLATFORM_PROFILE)" "1"
 has "sem auxiliar: mostra o sudoers"      "$out" "sudoers.d/platform-profile"
 has "sem auxiliar: mostra a copia"        "$out" "/usr/local/bin/platform-profile"
+eqv "sem Wi-Fi: desligado"                "$(conf "$H" SET_WIFI_POWERSAVE)/$(conf "$H" WIFI_IFACE)" "0/"
+lacks "sem Wi-Fi: sem sudoers do wifi"    "$out" "wifi-powersave"
+H="$TMP/h2w"
+out=$(NET="$TMP/net1" inst "$H" --yes)
+has "wifi sem auxiliar: mostra o sudoers" "$out" "sudoers.d/wifi-powersave"
+has "wifi sem auxiliar: mostra a copia"   "$out" "system/wifi-powersave' /usr/local/bin/wifi-powersave"
 
 # ===========================================================================
 group "perfil sem 'performance' (outro fabricante)"
@@ -187,6 +201,7 @@ runhook() {
     XDG_CURRENT_DESKTOP="${DESK:-}" MOCK_WAYLAND="${WL:-}" \
     GH_ACPI_DIR="${ACPI:-$TMP/sem-acpi}" GH_PROC_DIR="${PROC:-$TMP/sem-proc}" \
     MOCK_LOG="$h/log" MOCK_SUDO_ALLOW="${ALLOW:-}" MOCK_VRAM_FREE="${VFREE:-7000}" MOCK_SERVICES="${SVCS:-}" \
+    GH_NET_DIR="${NET:-$TMP/net1}" MOCK_WIFI_PS="${WIFIPS:-on}" \
     "$h/.local/bin/$s" >/dev/null 2>&1
 }
 H="$TMP/h1"; mkdir -p "$H/run"; : > "$H/log"
@@ -204,6 +219,23 @@ log=$(cat "$H/log")
 has "end: volta o perfil anterior"        "$log" "sudo /usr/local/bin/platform-profile balanced"
 has "end: religa o servico"               "$log" "systemctl start lan.service"
 has "end: restaura os dois monitores"     "$log" "--output eDP-1 --mode 1920x1080 --pos 2560x0"
+lacks "wifi sem auxiliar liberado: nao mexe" "$log" "wifi-powersave"
+
+# Wi-Fi: desliga a economia so se estava ligada, e religa no fim.
+WALLOW="/usr/local/bin/wifi-powersave"
+: > "$H/log"; ALLOW="$WALLOW" runhook "$H" gamemode-start.sh
+has "wifi: desliga a economia"            "$(cat "$H/log")" "sudo /usr/local/bin/wifi-powersave wlan1 off"
+: > "$H/log"; ALLOW="$WALLOW" WIFIPS=off runhook "$H" gamemode-start.sh
+lacks "wifi: start repetido nao reaplica" "$(cat "$H/log")" "wlan1 off"
+: > "$H/log"; ALLOW="$WALLOW" runhook "$H" gamemode-end.sh
+has "wifi: end religa a economia"         "$(cat "$H/log")" "sudo /usr/local/bin/wifi-powersave wlan1 on"
+: > "$H/log"; ALLOW="$WALLOW" WIFIPS=off runhook "$H" gamemode-start.sh
+lacks "wifi ja sem economia: nao desliga" "$(cat "$H/log")" "wlan1 off"
+: > "$H/log"; ALLOW="$WALLOW" runhook "$H" gamemode-end.sh
+lacks "wifi ja sem economia: end nao liga" "$(cat "$H/log")" "wlan1 on"
+: > "$H/log"; ALLOW="$WALLOW" NET="$TMP/sem-net" runhook "$H" gamemode-start.sh
+lacks "wifi: placa ausente, nao mexe"     "$(cat "$H/log")" "wifi-powersave"
+runhook "$H" gamemode-end.sh
 
 # Opcao por jogo: a variavel vem do ambiente do processo do gamemoderun.
 # fakeproc DIR PID VAR=valor...: cria um /proc/PID/environ falso
@@ -273,6 +305,7 @@ has "--help: mostra o uso"                "$out" "gamemoderun %command%"
 has "--help: opcao por jogo"              "$out" "GAMEMODE_SINGLE_MONITOR=0"
 has "--help: le a configuracao"           "$out" "monitor unico     : ligado (DP-1)"
 has "--help: servicos da configuracao"    "$out" "servicos pausados : lan.service"
+has "--help: wifi da configuracao"        "$out" "Wi-Fi sem economia: ligado (wlan1)"
 has "--help: acha o do sistema"           "$out" "$TMP/sysgames/gamemoderun"
 eqv "-h igual a --help"                   "$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" -h 2>&1)" "$out"
 out=$(HOME="$TMP/sem-home" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" 2>&1)
@@ -371,6 +404,15 @@ if [[ -r /sys/firmware/acpi/platform_profile_choices ]]; then
 else
   eqv "sem platform_profile: recusa"      "$rc" "1"
 fi
+
+# ===========================================================================
+group "system/wifi-powersave"
+# ===========================================================================
+out=$(sh "$ROOT/system/wifi-powersave" wlan0 turbo 2>&1); eqv "recusa acao invalida" "$?" "2"
+has "mostra o uso"                        "$out" "uso:"
+sh "$ROOT/system/wifi-powersave" ../../etc off >/dev/null 2>&1; eqv "recusa caminho no nome" "$?" "2"
+sh "$ROOT/system/wifi-powersave" -x off >/dev/null 2>&1;         eqv "recusa nome com hifen inicial" "$?" "2"
+sh "$ROOT/system/wifi-powersave" lo off >/dev/null 2>&1;         eqv "recusa interface que nao e Wi-Fi" "$?" "1"
 
 printf '\n\033[1m%d ok, %d falha(s)\033[0m\n' "$PASS" "$FAIL"
 (( FAIL == 0 ))

@@ -7,7 +7,7 @@ export LC_ALL=C
 
 STATE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state"
 PREV_PROFILE=""; PREV_PM=""; RESTORE_CMD=""; APPLIED_MONITOR=""; PAUSED_SERVICES=""; PREV_HELPER=""
-MON_BACKEND=""; MON_WAYLAND_DISPLAY=""
+MON_BACKEND=""; MON_WAYLAND_DISPLAY=""; WIFI_PS_IFACE=""; WIFI_PS_HELPER=""
 # shellcheck disable=SC1090
 [ -r "$STATE" ] && . "$STATE"
 
@@ -41,7 +41,12 @@ for svc in $PAUSED_SERVICES; do
     systemctl --user start "$svc" 2>/dev/null
 done
 
+# --- Economia de energia do Wi-Fi: religa se o start.sh desligou ---
+if [ -n "$WIFI_PS_IFACE" ]; then
+    sudo -n "${WIFI_PS_HELPER:-/usr/local/bin/wifi-powersave}" "$WIFI_PS_IFACE" on 2>/dev/null
+fi
+
 rm -f "$STATE"
-command -v notify-send >/dev/null 2>&1 && notify-send -a GameMode "GameMode desativado" "Monitores e energia restaurados."
+command -v notify-send >/dev/null 2>&1 && notify-send -a GameMode "GameMode desativado" "Monitores, energia e Wi-Fi restaurados."
 
 exit 0

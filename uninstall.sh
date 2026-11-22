@@ -10,7 +10,8 @@
 #
 # Desliga os ajustes de um jogo ainda ativo, apaga os scripts de ~/.local/bin,
 # devolve o gamemode.ini que existia antes do install (ou apaga o dos hooks) e,
-# com sudo, tira o /usr/local/bin/platform-profile e a regra do sudoers. O grupo
+# com sudo, tira o /usr/local/bin/platform-profile, o wifi-powersave e as regras
+# do sudoers. O grupo
 # gamemode e o proprio GameMode ficam.
 
 case "${1:-}" in

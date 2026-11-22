@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# iw falso: so existe para o install.sh achar uma ferramenta de Wi-Fi.
+exit 0

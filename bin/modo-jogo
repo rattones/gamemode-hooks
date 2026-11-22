@@ -7,6 +7,19 @@ START="${HOME}/.local/bin/gamemode-start.sh"
 END="${HOME}/.local/bin/gamemode-end.sh"
 STATE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state"
 
+# Economia de energia do Wi-Fi da configuracao (ler nao precisa de root).
+wifi_ps() {
+    local iface ps=""
+    iface=$(sed -n 's/^WIFI_IFACE=//p' "${HOME}/.config/gamemode-tweaks.conf" 2>/dev/null | tail -1)
+    [ -n "$iface" ] || { echo "-"; return; }
+    if command -v iw >/dev/null 2>&1; then
+        ps=$(iw dev "$iface" get power_save 2>/dev/null | sed -n 's/^Power save: *//p')
+    elif command -v iwconfig >/dev/null 2>&1; then
+        ps=$(iwconfig "$iface" 2>/dev/null | sed -n 's/.*Power Management: *\([a-z]*\).*/\1/p')
+    fi
+    echo "$iface ${ps:-?}"
+}
+
 status() {
     local prof free
     prof=$(cat /sys/firmware/acpi/platform_profile 2>/dev/null || echo "?")
@@ -15,6 +28,7 @@ status() {
     echo "  perfil ACPI : $prof"
     echo "  governor    : $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)"
     echo "  VRAM livre  : $free"
+    echo "  Wi-Fi econ. : $(wifi_ps)"
     echo "  monitores   : $(xrandr --query 2>/dev/null | awk '/ connected/{printf "%s ", $1}')"
 }
 

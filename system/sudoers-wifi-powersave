@@ -1,0 +1,4 @@
+# /etc/sudoers.d/wifi-powersave - deixa os hooks do GameMode desligarem a
+# economia de energia do Wi-Fi sem senha. So libera este caminho exato, que deve
+# ser do root e nao gravavel por outros. O install.sh mostra os comandos para instalar.
+@USER@ ALL=(root) NOPASSWD: /usr/local/bin/wifi-powersave

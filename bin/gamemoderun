@@ -100,7 +100,8 @@ uso: gamemoderun <comando do jogo> [argumentos...]
 Inicia o jogo com o GameMode ligado. Enquanto o jogo roda, o gamemoded aplica
 o governor "performance" na CPU e chama os hooks deste repositorio
 (gamemode-start.sh / gamemode-end.sh), que fazem o resto: perfil de energia,
-PowerMizer da NVIDIA, monitor unico, servicos pausados e coleta de dados. Ao
+PowerMizer da NVIDIA, monitor unico, economia de energia do Wi-Fi desligada,
+servicos pausados e coleta de dados. Ao
 fechar o jogo, tudo volta ao que era.
 
 COMO INICIAR
@@ -153,6 +154,7 @@ EOF
     fi
     echo "  PowerMizer NVIDIA : $(onoff "$(conf_val SET_POWERMIZER)")"
     echo "  alerta de VRAM    : $(onoff "$(conf_val NOTIFY_VRAM)" "abaixo de $(conf_val VRAM_WARN_PCT)% livre")"
+    echo "  Wi-Fi sem economia: $(onoff "$(conf_val SET_WIFI_POWERSAVE)" "$(conf_val WIFI_IFACE)")"
     echo "  servicos pausados : ${svc:-nenhum}"
     echo "  coleta (monitor)  : $(onoff "$(conf_val RUN_MONITOR)" "~/.monitor/log")"
   else

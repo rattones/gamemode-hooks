@@ -26,10 +26,14 @@ CONF="${HOME}/.config/gamemode-tweaks.conf"
 : "${NOTIFY_VRAM:=1}"
 : "${VRAM_WARN_PCT:=78}"
 : "${PAUSE_SERVICES:=}"
+: "${SET_WIFI_POWERSAVE:=1}"
+: "${WIFI_IFACE:=}"
+: "${WIFI_HELPER:=/usr/local/bin/wifi-powersave}"
 
 # Raiz do ACPI no sysfs e do /proc (so os testes trocam).
 ACPI_DIR="${GH_ACPI_DIR:-/sys/firmware/acpi}"
 PROC_DIR="${GH_PROC_DIR:-/proc}"
+NET_DIR="${GH_NET_DIR:-/sys/class/net}"
 
 # Quem grava o perfil como root, via "sudo -n" (regra no sudoers). O nome
 # antigo, legion-profile, continua aceito para instalacoes anteriores.
@@ -45,7 +49,7 @@ STATE="${XDG_RUNTIME_DIR:-/tmp}/gamemode-tweaks.state"
 # curtos de inspecao). Se ja capturamos o estado original, preservamos aquele
 # valor -- reler agora devolveria o valor JA modificado e perderiamos o original.
 PREV_PROFILE=""; PREV_PM=""; RESTORE_CMD=""; APPLIED_MONITOR=""; PAUSED_SERVICES=""; PREV_HELPER=""
-MON_BACKEND=""; MON_WAYLAND_DISPLAY=""
+MON_BACKEND=""; MON_WAYLAND_DISPLAY=""; WIFI_PS_IFACE=""; WIFI_PS_HELPER=""
 # shellcheck disable=SC1090
 [ -r "$STATE" ] && . "$STATE"
 
@@ -59,6 +63,8 @@ save_state() {
     [ -n "$PREV_HELPER" ]    && printf 'PREV_HELPER=%q\n' "$PREV_HELPER" >> "$STATE"
     [ -n "$MON_BACKEND" ]    && echo "MON_BACKEND=$MON_BACKEND"       >> "$STATE"
     [ -n "$MON_WAYLAND_DISPLAY" ] && printf 'MON_WAYLAND_DISPLAY=%q\n' "$MON_WAYLAND_DISPLAY" >> "$STATE"
+    [ -n "$WIFI_PS_IFACE" ]  && printf 'WIFI_PS_IFACE=%q\n' "$WIFI_PS_IFACE" >> "$STATE"
+    [ -n "$WIFI_PS_HELPER" ] && printf 'WIFI_PS_HELPER=%q\n' "$WIFI_PS_HELPER" >> "$STATE"
     return 0
 }
 
@@ -153,6 +159,18 @@ for svc in $PAUSE_SERVICES; do
         PAUSED_SERVICES="${PAUSED_SERVICES:+$PAUSED_SERVICES }$svc"
     fi
 done
+
+# --- Economia de energia do Wi-Fi: a placa cochila entre os beacons do roteador
+#     e segura pacotes, o que da picos de latencia no jogo online. Desliga via auxiliar root (sudo -n) e anota a
+#     interface so quando estava ligada, para o end.sh religar so nesse caso.
+#     Se o Wi-Fi reconectar no meio do jogo, o NetworkManager pode religa-la ---
+if [ "$SET_WIFI_POWERSAVE" = 1 ] && [ -z "$WIFI_PS_IFACE" ] && [ -n "$WIFI_IFACE" ] \
+   && [ -e "$NET_DIR/$WIFI_IFACE" ]; then
+    if [ "$(sudo -n "$WIFI_HELPER" "$WIFI_IFACE" get 2>/dev/null)" = on ] \
+       && sudo -n "$WIFI_HELPER" "$WIFI_IFACE" off 2>/dev/null; then
+        WIFI_PS_IFACE="$WIFI_IFACE"; WIFI_PS_HELPER="$WIFI_HELPER"
+    fi
+fi
 
 save_state
 

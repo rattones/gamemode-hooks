@@ -1,0 +1,31 @@
+#!/bin/sh
+# Liga, desliga ou consulta a economia de energia de uma placa Wi-Fi.
+# Uso: wifi-powersave <interface> <on|off|get>      (get imprime "on" ou "off")
+#
+# Roda como root via sudo, chamado pelos hooks do GameMode. Por isso so aceita
+# o nome de uma interface que o kernel lista como Wi-Fi e uma das tres acoes.
+# Usa o iw; sem ele, o iwconfig (wireless-tools).
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+usage() { echo "uso: $0 <interface-wifi> <on|off|get>" >&2; exit 2; }
+iface="${1:-}"; act="${2:-}"
+case "$iface" in ''|-*|.|..|*[!A-Za-z0-9_.-]*) usage ;; esac
+case "$act" in on|off|get) ;; *) usage ;; esac
+[ -d "/sys/class/net/$iface/wireless" ] || [ -e "/sys/class/net/$iface/phy80211" ] \
+    || { echo "$iface nao e uma interface Wi-Fi" >&2; exit 1; }
+
+if command -v iw >/dev/null 2>&1; then
+    if [ "$act" = get ]; then
+        iw dev "$iface" get power_save | sed -n 's/^Power save: *\(on\|off\).*/\1/p'
+    else
+        iw dev "$iface" set power_save "$act"
+    fi
+elif command -v iwconfig >/dev/null 2>&1; then
+    if [ "$act" = get ]; then
+        iwconfig "$iface" 2>/dev/null | sed -n 's/.*Power Management: *\(on\|off\).*/\1/p'
+    else
+        iwconfig "$iface" power "$act"
+    fi
+else
+    echo "sem iw nem iwconfig (instale o pacote iw)" >&2; exit 1
+fi

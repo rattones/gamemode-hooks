@@ -18,6 +18,7 @@ configuração.
 | perfil de energia da plataforma no modo de desempenho | volta ao perfil anterior | notebook com ACPI `platform_profile` |
 | PowerMizer da NVIDIA em "máximo desempenho" | volta ao modo anterior | NVIDIA com `nvidia-settings` |
 | só o monitor do jogo ligado ou todos, conforme a resposta à pergunta do `gamemoderun`; os outros desligam (no X11, na maior taxa de atualização) | restaura o layout exato de antes | mais de um monitor; X11 com `xrandr` ou Wayland com `kscreen-doctor` (KDE), `gdctl` (GNOME 48+) ou `wlr-randr` (wlroots) |
+| desliga a economia de energia da placa Wi-Fi (menos picos de latência online) | religa, se estava ligada | placa Wi-Fi com `iw` ou `iwconfig` |
 | pausa os serviços de usuário escolhidos | religa só os que pausou | systemd de usuário |
 | inicia a coleta do [monitor](https://github.com/rattones/monitor) no PID do jogo | encerra a coleta | `monitor` instalado |
 | notificação com a VRAM livre, alerta abaixo de 78% | notificação de que tudo foi restaurado | `nvidia-smi` |
@@ -58,6 +59,7 @@ O instalador detecta e vira pré-configuração:
 | NVIDIA sem `nvidia-settings` | só o alerta de VRAM |
 | mais de um monitor (X11, ou Wayland do KDE, GNOME 48+ ou wlroots) | **pergunta** qual é o monitor do jogo, ou não mexer |
 | um monitor só, ou sem ferramenta de monitores (`xrandr`; no Wayland, `kscreen-doctor`, `gdctl` ou `wlr-randr`) | não mexe nos monitores |
+| placa Wi-Fi e `iw` ou `iwconfig` | economia de energia do Wi-Fi desligada no jogo (com mais de uma placa, a conectada) |
 | `monitor` instalado | coleta ligada |
 | serviços de usuário rodando | **pergunta** quais pausar durante o jogo |
 
@@ -67,12 +69,14 @@ você dizer: o instalador pergunta, e no modo `--yes` mantém a sua e grava a
 detectada em `gamemode-tweaks.conf.detectado`. Todo arquivo trocado vira
 `<arquivo>.bak-<data>` antes.
 
-O auxiliar de perfil de energia o instalador só mostra, para você conferir
+Os auxiliares que rodam como root o instalador só mostra, para você conferir
 antes de rodar:
 
-- copiar `system/platform-profile` para `/usr/local/bin/` (dono root);
-- criar a regra `/etc/sudoers.d/platform-profile`, que libera só esse
-  caminho sem senha (conferida com `visudo -c`).
+- copiar `system/platform-profile` e `system/wifi-powersave` para
+  `/usr/local/bin/` (dono root);
+- criar as regras `/etc/sudoers.d/platform-profile` e
+  `/etc/sudoers.d/wifi-powersave`, que liberam só esses caminhos sem senha
+  (conferidas com `visudo -c`).
 
 Depois, `gamemoded -t` deve terminar em "All Tests Passed". No jogo (Steam →
 Propriedades → Opções de inicialização): `gamemoderun %command%`.
@@ -130,6 +134,7 @@ comentado. Uma mudança vale no próximo jogo, sem reiniciar nada.
 | `PROFILE_HELPER` | (detectado) | quem grava o perfil como root, via `sudo -n` |
 | `SET_POWERMIZER` | (detectado) | PowerMizer da NVIDIA em "máximo desempenho" |
 | `NOTIFY_VRAM` / `VRAM_WARN_PCT` | (detectado) / `78` | alerta quando a VRAM livre fica abaixo dessa % da total |
+| `SET_WIFI_POWERSAVE` / `WIFI_IFACE` | (detectado) | desliga a economia de energia dessa placa Wi-Fi durante o jogo |
 | `PAUSE_SERVICES` | (vazio) | serviços de usuário pausados durante o jogo, separados por espaço |
 | `RUN_MONITOR` / `MONITOR_BIN` | (detectado) | coleta com o [monitor](https://github.com/rattones/monitor) e onde ele está |
 | `MONITOR_MIN_RSS_MB` / `MONITOR_WAIT_S` | `300` / `180` | o jogo é o processo de maior RSS; espera ele passar desse tamanho ou desse tempo |
@@ -149,8 +154,9 @@ sudo ./uninstall.sh --purge         # apaga também os backups .bak-*
 Se um jogo (ou o `modo-jogo`) ainda estiver ativo, os ajustes são desfeitos
 primeiro. Depois saem os scripts de `~/.local/bin` e a configuração; o
 `gamemode.ini` que existia antes do instalador volta do backup (sem ele, o dos
-hooks é apagado). Com `sudo`, também saem o `/usr/local/bin/platform-profile` e
-a regra `/etc/sudoers.d/platform-profile`; sem, os comandos são mostrados. O
+hooks é apagado). Com `sudo`, também saem os `/usr/local/bin/platform-profile` e
+`/usr/local/bin/wifi-powersave` e as regras do `/etc/sudoers.d/`; sem, os
+comandos são mostrados. O
 grupo `gamemode` e o próprio GameMode ficam, porque servem sem os hooks. É o
 mesmo que `sudo ./install.sh --uninstall`.
 
@@ -169,6 +175,8 @@ mesmo que `sudo ./install.sh --uninstall`.
 | (gerado) `gamemode-tweaks.conf` | `~/.config/` | as opções dos hooks, comentadas; vale no próximo jogo, sem reiniciar nada |
 | `system/platform-profile` | `/usr/local/bin/` (root) | grava o perfil em `/sys/firmware/acpi/platform_profile`, aceitando só os nomes de `platform_profile_choices` |
 | `system/sudoers-platform-profile` | `/etc/sudoers.d/platform-profile` | modelo da regra do sudo |
+| `system/wifi-powersave` | `/usr/local/bin/` (root) | liga, desliga ou consulta a economia de energia de uma placa Wi-Fi (`iw`, ou `iwconfig`), aceitando só interfaces que o kernel lista como Wi-Fi |
+| `system/sudoers-wifi-powersave` | `/etc/sudoers.d/wifi-powersave` | modelo da regra do sudo |
 | `tests/` | — | testes do instalador e dos hooks contra hardware falso: `./tests/run-tests.sh` |
 
 ## Dependências
@@ -176,7 +184,7 @@ mesmo que `sudo ./install.sh --uninstall`.
 - `gamemode`, `busctl` (systemd), `notify-send`
 - conforme o hardware: `xrandr` (X11) ou, no Wayland, `kscreen-doctor` (KDE),
   `gdctl` (GNOME 48+) ou `wlr-randr` (wlroots); `nvidia-settings` e
-  `nvidia-smi` (NVIDIA)
+  `nvidia-smi` (NVIDIA); `iw` ou `iwconfig` (Wi-Fi)
 - `zenity` ou `kdialog`, para a pergunta dos monitores
 - [monitor](https://github.com/rattones/monitor) em `~/.local/bin/monitor`,
   para a coleta
@@ -188,6 +196,9 @@ mesmo que `sudo ./install.sh --uninstall`.
   start com `nvidia-settings`.
 - Instalações anteriores usavam `/usr/local/bin/legion-profile`; os hooks e o
   instalador continuam aceitando esse nome quando ele está liberado no sudoers.
+- A economia de energia do Wi-Fi é desligada só na interface, até o fim do
+  jogo. Se o Wi-Fi reconectar no meio dele, o NetworkManager aplica de novo a
+  própria configuração (`wifi.powersave`) e a economia pode voltar.
 - A Steam põe o próprio runtime (com um `zenity` antigo e as bibliotecas dela)
   no começo do PATH dos jogos. A pergunta dos monitores usa o `zenity` do
   sistema e roda sem o `LD_PRELOAD` e o `LD_LIBRARY_PATH` da Steam.
