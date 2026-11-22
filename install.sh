@@ -457,6 +457,10 @@ MONITOR_ARGS="-q"
 # perf junto (monitor -P): auto = so quando o perf esta liberado
 # (sudo sysctl kernel.perf_event_paranoid=1, vale ate o reboot); 1 = sempre; 0 = nunca.
 MONITOR_PERF=auto
+# Ping a cada segundo, gravado em <jogo>-<data>-ping.csv para o gamemode-travadas
+# separar travada do PC, do Wi-Fi e do servidor: auto = o roteador da rota
+# padrao; ou um IP/host fixo; 0 = nao grava.
+MONITOR_PING=auto
 EOF
 }
 

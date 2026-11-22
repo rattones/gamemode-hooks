@@ -66,7 +66,7 @@ eqv "monitores: escolhido o 1 (DP-1)"     "$(conf "$H" GAME_MONITOR)/$(conf "$H"
 eqv "servicos: pausa o escolhido"         "$(conf "$H" PAUSE_SERVICES)" '"lan.service"'
 has "lista os monitores com resolucao"    "$out" "1) DP-1 (2560x1440)"
 eqv "gamemode.ini com a home"             "$(grep -c "start = $H/.local/bin/gamemode-start.sh" "$H/.config/gamemode.ini")" "1"
-eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-displays.sh gamemode-end.sh gamemode-monitor.sh gamemode-start.sh gamemoderun modo-jogo "
+eqv "instala os hooks"                    "$(ls "$H/.local/bin" | tr '\n' ' ')" "gamemode-displays.sh gamemode-end.sh gamemode-monitor.sh gamemode-start.sh gamemode-travadas gamemoderun modo-jogo "
 lacks "auxiliar liberado: nada de sudoers" "$out" "sudoers.d/platform-profile"
 eqv "wifi: liga na placa conectada"       "$(conf "$H" SET_WIFI_POWERSAVE)/$(conf "$H" WIFI_IFACE)" "1/wlan1"
 lacks "wifi liberado: nada de sudoers"    "$out" "sudoers.d/wifi-powersave"
@@ -359,6 +359,50 @@ eqv "pula o zenity do runtime da Steam"   "$(env PATH="$TMP/steam-runtime/bin:$H
   HOME="$H" DISPLAY=:0 XDG_SESSION_TYPE=x11 XDG_RUNTIME_DIR="$TMP/gmr-run" MOCK_DIALOG=all "$GMR" jogo 2>&1)" "real: jogo [0]"
 
 # ===========================================================================
+group "monitor: ping e classificacao das travadas"
+# ===========================================================================
+H="$TMP/h1"; MON="$H/.local/bin/gamemode-monitor.sh"; TRV="$H/.local/bin/gamemode-travadas"
+out=$(printf '%s\n' 'PING 192.168.0.1 (192.168.0.1) 56(84) bytes of data.' \
+  '[1795379470.966021] 64 bytes from 192.168.0.1: icmp_seq=1 ttl=64 time=9.47 ms' \
+  '[1795379471.959652] no answer yet for icmp_seq=2' | HOME="$H" "$MON" __ping_csv 192.168.0.1)
+has "ping: cabecalho do CSV"              "$out" "timestamp,target,rtt_ms,lost"
+has "ping: resposta com rtt e ms"         "$out" ".966,192.168.0.1,9.47,0"
+has "ping: perdido marcado"               "$out" ".959,192.168.0.1,,1"
+eqv "ping: ignora o resto"                "$(printf '%s\n' "$out" | wc -l)" "3"
+
+# Coleta falsa de 10:00:00 a 10:02:00: GPU em 60% (amostra a cada 0,5 s) e ping
+# de 3 ms. 10:00:30 a GPU cai (PC); 10:01:00 o ping dispara com a GPU normal
+# (Wi-Fi); 10:01:40 nada muda (servidor).
+L="$TMP/log1"; mkdir -p "$L"; C="$L/jogo-20261122-100000.csv"
+awk 'BEGIN { print "timestamp,gpu_index,gpu_name,gpu_util_pct"
+  for (t = 0; t < 120; t += 0.5) printf "2026-11-22T10:%02d:%06.3f,0,GPU,%d\n", t / 60, t % 60, (t >= 30 && t < 32) ? 2 : 60 }' > "$C"
+awk 'BEGIN { print "timestamp,target,rtt_ms,lost"
+  for (t = 0; t < 120; t++) printf "2026-11-22T10:%02d:%02d.100,gw,%s\n", t / 60, t % 60,
+    t == 61 ? ",1" : (t >= 60 && t < 63) ? "300,0" : "3,0" }' > "${C%.csv}-ping.csv"
+trv() { HOME="$H" MONITOR_LOG_DIR="$L" XDG_RUNTIME_DIR="$TMP/trv-run" PATH="$MOCKS:$PATH" "$TRV" "$@" 2>&1; }
+out=$(trv)
+has "detecta: usa a coleta mais recente"  "$out" "coleta: $C"
+has "detecta: GPU parou -> PC"            "$out" "10:00:30  detectada PC"
+has "detecta: ping disparou -> Wi-Fi"     "$out" "10:01:00  detectada Wi-Fi"
+has "detecta: perdas no ping"             "$out" "1 perdido(s)"
+has "detecta: total"                      "$out" "total: PC 1, Wi-Fi 1, servidor 0"
+out=$(trv "$C" 10:01:42 10:00:33)
+has "hora dada sem sinal -> servidor"     "$out" "10:01:42  dada      servidor"
+has "hora dada na queda da GPU -> PC"     "$out" "10:00:33  dada      PC"
+mkdir -p "$TMP/trv-run"
+out=$(trv marcar); eqv "marcar sem coleta: recusa" "$?" "1"
+echo "$C" > "$TMP/trv-run/gamemode-monitor.current"
+trv marcar >/dev/null
+eqv "marcar: grava ao lado da coleta"     "$(wc -l < "${C%.csv}-marcas.txt")" "1"
+echo "2026-11-22T10:01:04.000" > "${C%.csv}-marcas.txt"
+has "marca no pico de ping -> Wi-Fi"      "$(trv)" "10:01:04  marcada   Wi-Fi"
+rm "${C%.csv}-ping.csv"
+out=$(trv 10:01:42)
+has "sem ping: avisa"                     "$out" "so a GPU conta"
+has "sem ping: nao chuta servidor"        "$out" "sem ping"
+eqv "argumento invalido"                  "$(trv xyz >/dev/null; echo $?)" "2"
+
+# ===========================================================================
 group "desinstalacao"
 # ===========================================================================
 # uninst HOME [opcoes...]: roda o uninstall.sh com hardware falso
@@ -375,7 +419,7 @@ inst "$H" --yes >/dev/null 2>&1 < /dev/null                          # sem mudan
 mkdir -p "$H/run"; echo "PAUSED_SERVICES=lan.service" > "$H/run/gamemode-tweaks.state"
 out=$(uninst "$H" --check)
 has "--check: diz o que apagaria"         "$out" "apagaria:   $H/.local/bin/gamemoderun"
-eqv "--check: nao apaga nada"             "$(ls "$H/.local/bin" | wc -l)" "6"
+eqv "--check: nao apaga nada"             "$(ls "$H/.local/bin" | wc -l)" "7"
 eqv "--check: nao desfaz o jogo ativo"    "$([[ -e "$H/run/gamemode-tweaks.state" ]] && echo sim)" "sim"
 out=$(uninst "$H" --yes)
 eqv "apaga os scripts"                    "$(ls "$H/.local/bin" | wc -l)" "0"

@@ -20,7 +20,7 @@ configuração.
 | só o monitor do jogo ligado ou todos, conforme a resposta à pergunta do `gamemoderun`; os outros desligam (no X11, na maior taxa de atualização) | restaura o layout exato de antes | mais de um monitor; X11 com `xrandr` ou Wayland com `kscreen-doctor` (KDE), `gdctl` (GNOME 48+) ou `wlr-randr` (wlroots) |
 | desliga a economia de energia da placa Wi-Fi (menos picos de latência online) | religa, se estava ligada | placa Wi-Fi com `iw` ou `iwconfig` |
 | pausa os serviços de usuário escolhidos | religa só os que pausou | systemd de usuário |
-| inicia a coleta do [monitor](https://github.com/rattones/monitor) no PID do jogo | encerra a coleta | `monitor` instalado |
+| inicia a coleta do [monitor](https://github.com/rattones/monitor) no PID do jogo, mais o ping até o roteador a cada segundo | encerra a coleta | `monitor` instalado; `ping` e `ip` |
 | notificação com a VRAM livre, alerta abaixo de 78% | notificação de que tudo foi restaurado | `nvidia-smi` |
 
 O estado anterior fica em `$XDG_RUNTIME_DIR/gamemode-tweaks.state`. Como o
@@ -141,6 +141,35 @@ comentado. Uma mudança vale no próximo jogo, sem reiniciar nada.
 | `MONITOR_MIN_RSS_MB` / `MONITOR_WAIT_S` | `300` / `180` | o jogo é o processo de maior RSS; espera ele passar desse tamanho ou desse tempo |
 | `MONITOR_ARGS` | `-q` | opções extras do monitor (ex.: `-q -i 1000`) |
 | `MONITOR_PERF` | `auto` | `perf` junto (`monitor -P`): `auto` = quando liberado, `1` = sempre, `0` = nunca |
+| `MONITOR_PING` | `auto` | ping a cada segundo durante a coleta: `auto` = o roteador da rota padrão, ou um IP/host; `0` = não grava |
+
+## Classificar as travadas
+
+Durante a coleta, o `gamemode-monitor.sh` grava também o ping até o roteador a
+cada segundo, em `~/.monitor/log/<jogo>-<data>-ping.csv`, ao lado dos CSVs do
+monitor. O `gamemode-travadas` cruza esse ping com a GPU e diz de onde veio
+cada travada:
+
+| GPU | Ping ao roteador | Causa |
+|---|---|---|
+| parou (caiu para menos de 30% do uso de antes, ou o monitor ficou sem amostra) | — | **PC** |
+| seguiu | disparou (4× o normal e +50 ms, ou pacote perdido) | **Wi-Fi** (ou rede local) |
+| seguiu | normal | **servidor** (ou a internet depois do roteador) |
+
+```bash
+gamemode-travadas                       # coleta mais recente: procura sozinho as travadas
+gamemode-travadas 21:14:05 21:20:41     # classifica as horas em que você sentiu a travada
+gamemode-travadas ~/.monitor/log/dota2-20261122-162057.csv
+gamemode-travadas marcar                # durante o jogo: "travou agora"
+```
+
+Sozinho, ele só acha o que deixa rastro na máquina (GPU parada ou ping
+disparado), e telas de carregamento ou menus também derrubam a GPU. Travada de
+servidor não deixa rastro: precisa da hora. O jeito mais prático é pôr
+`gamemode-travadas marcar` num atalho de teclado do sistema e apertá-lo quando
+travar; as marcas ficam em `<jogo>-<data>-marcas.txt` e entram na análise sem
+precisar digitar a hora. Coletas anteriores ao registro do ping são analisadas
+só pela GPU.
 
 ## Desinstalar
 
@@ -167,7 +196,8 @@ mesmo que `sudo ./install.sh --uninstall`.
 |---|---|---|
 | `bin/gamemode-start.sh` | `~/.local/bin/` | hook de início |
 | `bin/gamemode-end.sh` | `~/.local/bin/` | hook de fim: desfaz o start |
-| `bin/gamemode-monitor.sh` | `~/.local/bin/` | acha o PID do jogo pelo D-Bus do GameMode (`ListGames`, mais os filhos, escolhendo o de maior RSS, porque com Proton o jogo é filho dos wrappers da Steam) e roda `monitor all -f pid:N`; com `MONITOR_PERF=auto` acrescenta `-P` quando o `perf` está liberado |
+| `bin/gamemode-monitor.sh` | `~/.local/bin/` | acha o PID do jogo pelo D-Bus do GameMode (`ListGames`, mais os filhos, escolhendo o de maior RSS, porque com Proton o jogo é filho dos wrappers da Steam) e roda `monitor all -f pid:N`; com `MONITOR_PERF=auto` acrescenta `-P` quando o `perf` está liberado; grava o ping até o roteador ao lado |
+| `bin/gamemode-travadas` | `~/.local/bin/` | classifica as travadas de uma coleta (PC, Wi-Fi ou servidor) e marca "travou agora" durante o jogo |
 | `bin/gamemoderun` | `~/.local/bin/` | embrulho do `gamemoderun` do sistema: pergunta em tela se o jogo usa um ou todos os monitores e repassa tudo para o `/usr/games/gamemoderun`; `gamemoderun --help` (ou `-h`) explica como iniciar os jogos, as opções por jogo e mostra a configuração desta máquina |
 | `bin/gamemode-displays.sh` | `~/.local/bin/` | lê, troca e restaura os monitores com a ferramenta da sessão (`xrandr`, `kscreen-doctor`, `gdctl` ou `wlr-randr`); usado pelos hooks, pelo `gamemoderun` e pelo instalador |
 | `bin/modo-jogo` | `~/.local/bin/` | liga, desliga ou mostra os mesmos ajustes à mão: `modo-jogo on\|off\|toggle\|status` |

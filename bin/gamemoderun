@@ -156,7 +156,7 @@ EOF
     echo "  alerta de VRAM    : $(onoff "$(conf_val NOTIFY_VRAM)" "abaixo de $(conf_val VRAM_WARN_PCT)% livre")"
     echo "  Wi-Fi sem economia: $(onoff "$(conf_val SET_WIFI_POWERSAVE)" "$(conf_val WIFI_IFACE)")"
     echo "  servicos pausados : ${svc:-nenhum}"
-    echo "  coleta (monitor)  : $(onoff "$(conf_val RUN_MONITOR)" "~/.monitor/log")"
+    echo "  coleta (monitor)  : $(onoff "$(conf_val RUN_MONITOR)" "~/.monitor/log; travadas: gamemode-travadas")"
   else
     echo "NESTA MAQUINA: sem $CONF - rode o install.sh do gamemode-hooks."
   fi

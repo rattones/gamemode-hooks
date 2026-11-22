@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# Classifica as travadas de um jogo cruzando a GPU (CSV do monitor) com o ping
+# ate o roteador (<jogo>-<data>-ping.csv, gravado pelo gamemode-monitor.sh):
+#
+#   GPU parou                     -> PC      (o jogo deixou de desenhar)
+#   GPU seguiu e o ping disparou  -> Wi-Fi   (ou a rede local)
+#   nenhum dos dois               -> servidor (ou a internet depois do roteador)
+#
+# Uso:
+#   gamemode-travadas marcar              marca "travou agora" no jogo em andamento
+#                                         (feito para um atalho de teclado)
+#   gamemode-travadas [CSV] [HH:MM:SS...] classifica as travadas da coleta
+#
+# Sem CSV, usa a coleta mais recente de ~/.monitor/log. As travadas analisadas
+# sao as horas dadas na linha de comando mais as marcadas durante o jogo; sem
+# nenhuma, procura sozinho quedas da GPU e picos de ping. Travada de servidor
+# so aparece com hora dada ou marcada: nada na maquina denuncia esse caso.
+set -u
+export LC_ALL=C
+
+CONF="${HOME}/.config/gamemode-tweaks.conf"
+# shellcheck disable=SC1090
+[ -r "$CONF" ] && . "$CONF"
+LOG_DIR="${MONITOR_LOG_DIR:-$HOME/.monitor/log}"
+CURRENT="${XDG_RUNTIME_DIR:-/tmp}/gamemode-monitor.current"
+
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
+notify() { command -v notify-send >/dev/null 2>&1 && notify-send -a GameMode "$@"; }
+
+marcar() {
+    local csv ts
+    csv=$(cat "$CURRENT" 2>/dev/null)
+    if [ -z "$csv" ] || [ ! -e "$csv" ]; then
+        notify "Travada nao marcada" "Nenhuma coleta do monitor em andamento."
+        echo "nenhuma coleta do monitor em andamento" >&2
+        return 1
+    fi
+    ts=$(date +%Y-%m-%dT%H:%M:%S.%3N)
+    echo "$ts" >> "${csv%.csv}-marcas.txt"
+    notify -t 1500 "Travada marcada" "${ts#*T}"
+}
+
+# A coleta mais recente: o CSV principal do monitor, <jogo>-AAAAMMDD-HHMMSS.csv.
+latest_csv() {
+    find "$LOG_DIR" -maxdepth 1 -name '*-[0-9]*-[0-9]*.csv' -printf '%T@ %p\n' 2>/dev/null \
+        | grep -E -- '-[0-9]{8}-[0-9]{6}\.csv$' | sort -rn | head -1 | cut -d' ' -f2-
+}
+
+analisar() {
+    local csv="" times=() ping marks
+    while (( $# )); do
+        case "$1" in
+            *.csv) csv="$1" ;;
+            [0-9]*:[0-9]*) times+=("$1") ;;
+            *) echo "argumento desconhecido: $1 (veja --help)" >&2; return 2 ;;
+        esac
+        shift
+    done
+    [ -n "$csv" ] || csv=$(latest_csv)
+    [ -n "$csv" ] && [ -r "$csv" ] || { echo "nenhuma coleta em $LOG_DIR" >&2; return 1; }
+    ping="${csv%.csv}-ping.csv"
+    marks="${csv%.csv}-marcas.txt"
+
+    echo "coleta: $csv"
+    [ -r "$ping" ] || echo "(sem $ping: coleta anterior ao registro do ping; so a GPU conta)"
+
+    # Arquivos lidos pelo awk: a GPU, o ping e as horas (marcadas + dadas).
+    {
+        [ -r "$marks" ] && sed 's/^/M /' "$marks"
+        for t in "${times[@]}"; do echo "H $t"; done
+    } | awk -F, -v gpu="$csv" -v pingf="$ping" '
+    # segundos desde a meia-noite do primeiro dia da coleta
+    function secs(ts,   d, h, r) {
+        d = substr(ts, 1, 10)
+        if (day0 == "") day0 = d
+        h = substr(ts, 12)
+        split(h, r, ":")
+        return (d != day0 ? 86400 : 0) + r[1] * 3600 + r[2] * 60 + r[3]
+    }
+    function hms(s) { s = int(s) % 86400; return sprintf("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) }
+    # primeiro indice com tempo >= x (busca binaria; g = 1 GPU, 0 ping)
+    function lb(g, x,   lo, hi, m) {
+        lo = 1; hi = (g ? ng : np) + 1
+        while (lo < hi) { m = int((lo + hi) / 2); if ((g ? gt[m] : pt[m]) < x) lo = m + 1; else hi = m }
+        return lo
+    }
+    # medias em [a, b) pelas somas acumuladas: a GPU, e o rtt sem as perdas
+    function gpu_mean(a, b,   i, j) { i = lb(1, a); j = lb(1, b)
+        return j > i ? (gS[j - 1] - gS[i - 1]) / (j - i) : -1 }
+    function ping_mean(a, b,   i, j, n) { i = lb(0, a); j = lb(0, b); n = pN[j - 1] - pN[i - 1]
+        return n > 0 ? (pS[j - 1] - pS[i - 1]) / n : -1 }
+
+    # classify T A B: olha a janela [T-A, T+B] e preenche o resultado global
+    function classify(T, A, B,   i, base, mn, gap, last, pbase, pmax, lost, n, gstop, pspike, lim) {
+        base = gpu_mean(T - A - 10, T - A)
+        mn = 101; gap = 0; last = ""; n = 0
+        for (i = lb(1, T - A - 2); i <= ng && gt[i] <= T + B; i++) {
+            if (last != "" && gt[i] - last > gap) gap = gt[i] - last
+            last = gt[i]
+            if (gt[i] >= T - A) { n++; if (gu[i] < mn) mn = gu[i] }
+        }
+        gstop = (n && base >= 30 && mn <= base * 0.3) || gap > 2.5
+        pbase = ping_mean(T - A - 60, T - A); pmax = 0; lost = 0
+        for (i = lb(0, T - A); i <= np && pt[i] <= T + B; i++)
+            if (pl[i]) lost++; else if (pr[i] > pmax) pmax = pr[i]
+        if (pbase < 0) pbase = 1
+        lim = pbase * 4; if (lim < pbase + 50) lim = pbase + 50
+        pspike = lost > 0 || pmax >= lim
+        if (gstop)        cls = "PC"
+        else if (!np)     cls = "sem ping"
+        else if (pspike)  cls = "Wi-Fi"
+        else              cls = "servidor"
+        gdet = gap > 2.5 ? sprintf("sem amostra por %.1fs", gap) \
+             : n ? sprintf("%d%% (antes %d%%)", mn, base < 0 ? 0 : base) : "sem dados"
+        pdet = !np ? "sem dados" : sprintf("%.0f ms (antes %.0f)%s", pmax, pbase, lost ? sprintf(", %d perdido(s)", lost) : "")
+    }
+
+    FILENAME == "-" {
+        split($0, f, " "); if (f[1] == "M") want[++nw] = f[2]; else ask[++na] = f[2]
+        next
+    }
+
+    END {
+        # GPU: timestamp e gpu_util_pct (coluna 4) do CSV do monitor
+        getline hdr < gpu
+        gS[0] = pS[0] = pN[0] = 0
+        while ((getline l < gpu) > 0) {
+            split(l, c, ","); gt[++ng] = secs(c[1]); gu[ng] = c[4] + 0; gS[ng] = gS[ng - 1] + gu[ng]
+        }
+        if (!ng) { print "CSV da GPU vazio"; exit 1 }
+        if ((getline hdr < pingf) > 0)
+            while ((getline l < pingf) > 0) {
+                split(l, c, ","); pt[++np] = secs(c[1]); pl[np] = c[4] == 1; pr[np] = c[3] + 0
+                pS[np] = pS[np - 1] + (pl[np] ? 0 : pr[np]); pN[np] = pN[np - 1] + !pl[np]
+            }
+        start = gt[1]
+
+        # Eventos: as marcas e horas dadas; a pessoa sente a travada e so depois
+        # marca, entao a janela olha mais para tras (5 s) do que para frente (1 s).
+        for (i = 1; i <= nw; i++) { ev[++ne] = secs(want[i]); src[ne] = "marcada" }
+        for (i = 1; i <= na; i++) {
+            split(ask[i], r, ":"); s = r[1] * 3600 + r[2] * 60 + r[3]
+            if (s < start - 60) s += 86400
+            ev[++ne] = s; src[ne] = "dada"
+        }
+        A = 5; B = 1
+
+        # Sem nenhuma: procura sozinho quedas da GPU e picos de ping.
+        if (!ne) {
+            auto = 1; A = 2; B = 2
+            for (i = 2; i <= ng; i++) {
+                b = gpu_mean(gt[i] - 12, gt[i] - 2)
+                if ((b >= 30 && gu[i] <= b * 0.3) || gt[i] - gt[i - 1] > 2.5) cand[++nc] = gt[i]
+            }
+            for (i = 1; i <= np; i++) {
+                b = ping_mean(pt[i] - 62, pt[i] - 2); if (b < 0) b = 1
+                lim = b * 4; if (lim < b + 50) lim = b + 50
+                if (pl[i] || pr[i] >= lim) cand[++nc] = pt[i]
+            }
+            # ordena e junta o que estiver a menos de 5 s do anterior
+            for (i = 2; i <= nc; i++) { v = cand[i]; for (j = i - 1; j >= 1 && cand[j] > v; j--) cand[j + 1] = cand[j]; cand[j + 1] = v }
+            for (i = 1; i <= nc; i++) if (i == 1 || cand[i] - cand[i - 1] >= 5) { ev[++ne] = cand[i]; src[ne] = "detectada" }
+        }
+
+        if (!ne) {
+            print "nenhuma travada: a GPU nao caiu e o ping nao disparou."
+            print "Se travou mesmo assim, foi o servidor: passe a hora (HH:MM:SS) ou use"
+            print "\"gamemode-travadas marcar\" num atalho de teclado durante o jogo."
+            exit 0
+        }
+        printf "%-9s %-9s %-9s %-26s %s\n", "hora", "origem", "causa", "GPU (minima)", "ping ao roteador (maximo)"
+        for (i = 1; i <= ne; i++) {
+            classify(ev[i], A, B)
+            printf "%-9s %-9s %-9s %-26s %s\n", hms(ev[i]), src[i], cls, gdet, pdet
+            tot[cls]++
+        }
+        printf "\ntotal: PC %d, Wi-Fi %d, servidor %d%s\n", tot["PC"], tot["Wi-Fi"], tot["servidor"], tot["sem ping"] ? sprintf(", sem ping %d", tot["sem ping"]) : ""
+        if (auto) {
+            print "(detectadas sozinhas: quedas da GPU em menus e telas de carregamento tambem"
+            print " aparecem; travada de servidor so com hora dada ou marcada)"
+        }
+    }' -
+}
+
+case "${1:-}" in
+    -h|--help) usage ;;
+    marcar)    marcar ;;
+    *)         analisar "$@" ;;
+esac

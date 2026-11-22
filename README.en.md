@@ -20,7 +20,7 @@ generate the configuration.
 | only the game's monitor on, or all of them, following the answer to `gamemoderun`'s question; the others are turned off (on X11, at the highest refresh rate) | the exact previous layout restored | more than one monitor; X11 with `xrandr` or Wayland with `kscreen-doctor` (KDE), `gdctl` (GNOME 48+) or `wlr-randr` (wlroots) |
 | turns off the Wi-Fi card's power saving (fewer latency spikes online) | turns it back on, if it was on | Wi-Fi card with `iw` or `iwconfig` |
 | pauses the user services you chose | restarts only the ones it paused | systemd user session |
-| starts [monitor](https://github.com/rattones/monitor) on the game's PID | stops the collection | `monitor` installed |
+| starts [monitor](https://github.com/rattones/monitor) on the game's PID, plus a ping to the router every second | stops the collection | `monitor` installed; `ping` and `ip` |
 | notification with free VRAM, warning below 78% | notification that everything was restored | `nvidia-smi` |
 
 The previous state is kept in `$XDG_RUNTIME_DIR/gamemode-tweaks.state`.
@@ -142,6 +142,35 @@ and commented. A change applies to the next game, with nothing to restart.
 | `MONITOR_MIN_RSS_MB` / `MONITOR_WAIT_S` | `300` / `180` | the game is the process with the largest RSS; waits until it passes this size or this time |
 | `MONITOR_ARGS` | `-q` | extra monitor options (e.g. `-q -i 1000`) |
 | `MONITOR_PERF` | `auto` | `perf` too (`monitor -P`): `auto` = when allowed, `1` = always, `0` = never |
+| `MONITOR_PING` | `auto` | ping every second while collecting: `auto` = the default route's router, or an IP/host; `0` = off |
+
+## Classifying stutters
+
+While collecting, `gamemode-monitor.sh` also records the ping to the router
+every second, in `~/.monitor/log/<game>-<date>-ping.csv`, next to monitor's
+CSVs. `gamemode-travadas` matches that ping against the GPU and tells where
+each stutter came from:
+
+| GPU | Ping to the router | Cause |
+|---|---|---|
+| stopped (dropped below 30% of its previous use, or monitor missed samples) | — | **PC** |
+| kept going | spiked (4× normal and +50 ms, or a lost packet) | **Wi-Fi** (or local network) |
+| kept going | normal | **server** (or the internet past the router) |
+
+```bash
+gamemode-travadas                       # latest collection: finds stutters by itself
+gamemode-travadas 21:14:05 21:20:41     # classifies the times you felt a stutter
+gamemode-travadas ~/.monitor/log/dota2-20261122-162057.csv
+gamemode-travadas marcar                # during the game: "it stuttered now"
+```
+
+On its own it only finds what leaves a trace on the machine (a stopped GPU or
+a ping spike), and loading screens or menus also drop the GPU. A server
+stutter leaves no trace: it needs the time. The handiest way is to bind
+`gamemode-travadas marcar` to a system keyboard shortcut and press it when the
+game stutters; the marks go to `<game>-<date>-marcas.txt` and are analysed
+without typing the time. Collections from before the ping was recorded are
+analysed by the GPU only.
 
 ## Uninstall
 
@@ -167,7 +196,8 @@ without the hooks. Same as `sudo ./install.sh --uninstall`.
 |---|---|---|
 | `bin/gamemode-start.sh` | `~/.local/bin/` | start hook |
 | `bin/gamemode-end.sh` | `~/.local/bin/` | end hook: undoes the start |
-| `bin/gamemode-monitor.sh` | `~/.local/bin/` | finds the game's PID through GameMode's D-Bus API (`ListGames` plus children, picking the largest RSS, since under Proton the game is a child of Steam's wrappers) and runs `monitor all -f pid:N`; with `MONITOR_PERF=auto` it adds `-P` when `perf` is allowed |
+| `bin/gamemode-monitor.sh` | `~/.local/bin/` | finds the game's PID through GameMode's D-Bus API (`ListGames` plus children, picking the largest RSS, since under Proton the game is a child of Steam's wrappers) and runs `monitor all -f pid:N`; with `MONITOR_PERF=auto` it adds `-P` when `perf` is allowed; records the ping to the router next to it |
+| `bin/gamemode-travadas` | `~/.local/bin/` | classifies a collection's stutters (PC, Wi-Fi or server) and marks "it stuttered now" during the game |
 | `bin/gamemoderun` | `~/.local/bin/` | wrapper around the system `gamemoderun`: asks on screen whether the game uses one monitor or all of them and passes everything on to `/usr/games/gamemoderun`; `gamemoderun --help` (or `-h`) explains how to launch games and the per-game options, and shows this machine's settings |
 | `bin/gamemode-displays.sh` | `~/.local/bin/` | reads, switches and restores monitors with the session's tool (`xrandr`, `kscreen-doctor`, `gdctl` or `wlr-randr`); used by the hooks, `gamemoderun` and the installer |
 | `bin/modo-jogo` | `~/.local/bin/` | turns the same tweaks on and off by hand: `modo-jogo on\|off\|toggle\|status` |
