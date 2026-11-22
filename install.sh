@@ -22,6 +22,7 @@
 #     kscreen-doctor, gdctl ou wlr-randr)
 #   - placa Wi-Fi (e o iw ou iwconfig): economia de energia desligada no jogo
 #   - o monitor (github.com/rattones/monitor), para coletar dados do jogo
+#   - o MangoHud: so uma sugestao (nao e instalado nem configurado aqui)
 #
 # O que e duvida vira pergunta: qual monitor usar no jogo quando ha mais de um,
 # qual perfil de energia quando o firmware nao tem "performance", e quais
@@ -369,6 +370,17 @@ else
   note "para instalar, baixe o monitor em (https://github.com/rattones/monitor)"
 fi
 
+# MangoHud: sobreposicao com FPS, frametime, GPU e CPU no jogo. Nao e usado pelos
+# hooks; so sugere instalar e mostra como ligar, porque combina com o gamemoderun.
+HAS_MANGOHUD=0
+if as_user sh -c 'command -v mangohud' >/dev/null 2>&1; then
+  HAS_MANGOHUD=1
+  note "MangoHud: instalado - para ver FPS, GPU e CPU no jogo: gamemoderun mangohud %command%"
+else
+  note "MangoHud: nao instalado (opcional) - mostra FPS, frametime, GPU e CPU durante o jogo"
+  note "  sugestao: sudo apt install mangohud   (depois: gamemoderun mangohud %command%)"
+fi
+
 # Servicos a pausar: so a pessoa sabe quais atrapalham o jogo.
 PAUSE_SERVICES=""
 if (( INTERACTIVE )); then
@@ -545,4 +557,9 @@ echo
 echo "No jogo (Steam > Propriedades > Opcoes de inicializacao): gamemoderun %command%"
 [[ "$SINGLE_MONITOR" == 1 ]] && \
   echo "  (ao abrir o jogo, pergunta: so o $GAME_MONITOR ou todos os monitores)"
+if (( HAS_MANGOHUD )); then
+  echo "  com MangoHud: gamemoderun mangohud %command%"
+else
+  echo "Sugestao: instale o MangoHud (sudo apt install mangohud) para ver FPS e uso da GPU no jogo."
+fi
 echo "Teste do GameMode: gamemoded -t   (deve terminar em \"All Tests Passed\")"

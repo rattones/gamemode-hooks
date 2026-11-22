@@ -62,6 +62,7 @@ O instalador detecta e vira pré-configuração:
 | placa Wi-Fi e `iw` ou `iwconfig` | economia de energia do Wi-Fi desligada no jogo (com mais de uma placa, a conectada) |
 | `monitor` instalado | coleta ligada |
 | serviços de usuário rodando | **pergunta** quais pausar durante o jogo |
+| MangoHud ausente | **sugere** instalar (`sudo apt install mangohud`); instalado, mostra como usar: `gamemoderun mangohud %command%` |
 
 Com `--yes`, ou sem terminal, tudo o que seria pergunta fica desligado. Uma
 configuração que já existe (`~/.config/gamemode-tweaks.conf`) não é trocada sem
@@ -188,6 +189,8 @@ mesmo que `sudo ./install.sh --uninstall`.
 - `zenity` ou `kdialog`, para a pergunta dos monitores
 - [monitor](https://github.com/rattones/monitor) em `~/.local/bin/monitor`,
   para a coleta
+- opcional: [MangoHud](https://github.com/flightlessmango/MangoHud), para ver
+  FPS, frametime, GPU e CPU no jogo (`gamemoderun mangohud %command%`)
 
 ## Notas
 
