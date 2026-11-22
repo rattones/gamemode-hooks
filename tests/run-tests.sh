@@ -160,16 +160,29 @@ out=$(HOME="$H" PATH="$MOCKS:/usr/bin:/bin" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1
 eqv "ausente: coleta desligada"           "$(conf "$H" RUN_MONITOR)" "0"
 has "ausente: mensagem"                   "$out" "monitor de dados não instalado - coleta de dados desligada"
 has "ausente: onde baixar"                "$out" "para instalar, baixe o monitor em (https://github.com/rattones/monitor)"
-# MangoHud: so sugestao. Instalado (falso, no PATH): mostra como usar.
+# MangoHud instalado (falso, no PATH): mostra como usar e nao oferece instalar.
 mkdir -p "$TMP/mango"; printf '#!/bin/sh\nexit 0\n' > "$TMP/mango/mangohud"; chmod +x "$TMP/mango/mangohud"
 out=$(HOME="$TMP/h18" PATH="$TMP/mango:$MOCKS:/usr/bin:/bin" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1 \
       GH_ACPI_DIR="$TMP/sem-acpi" GH_NET_DIR="$TMP/sem-net" "$ROOT/install.sh" --yes 2>&1)
 has "mangohud instalado: mostra como usar" "$out" "com MangoHud: gamemoderun mangohud %command%"
-lacks "mangohud instalado: sem sugestao"  "$out" "apt install mangohud"
+lacks "mangohud instalado: sem sugestao"  "$out" "instalar o MangoHud"
+# Ausente, com pergunta (depois da do monitor): "s" instala pelo gerenciador de pacotes (apt-get falso,
+# que poe um mangohud falso em MOCK_MANGO_DIR); --yes nao instala.
+mkdir -p "$TMP/mango2"
+out=$(PATH="$MOCKS:$TMP/mango2:/usr/bin:/bin" MOCK_MANGO_DIR="$TMP/mango2" INTER=1 inst "$TMP/h20" <<< $'0\ns')
+has "mangohud: pergunta se instala"       "$out" "instalar o MangoHud agora (apt-get install -y mangohud)?"
+has "mangohud 's': instala"               "$(cat "$TMP/h20.log" 2>/dev/null)" "apt-get install -y mangohud"
+has "mangohud 's': mostra como usar"      "$out" "com MangoHud: gamemoderun mangohud %command%"
+rm -f "$TMP/mango2/mangohud"
+out=$(PATH="$MOCKS:$TMP/mango2:/usr/bin:/bin" MOCK_MANGO_DIR="$TMP/mango2" INTER=1 inst "$TMP/h21" <<< $'0\nn')
+lacks "mangohud 'n': nao instala"         "$(cat "$TMP/h21.log" 2>/dev/null)" "apt-get"
+out=$(PATH="$MOCKS:$TMP/mango2:/usr/bin:/bin" MOCK_MANGO_DIR="$TMP/mango2" inst "$TMP/h22" --yes)
+lacks "mangohud --yes: nao instala"       "$(cat "$TMP/h22.log" 2>/dev/null)" "apt-get"
+has "mangohud --yes: mostra o comando"    "$out" "sudo apt-get install -y mangohud"
 if ! PATH="$MOCKS:/usr/bin:/bin" command -v mangohud >/dev/null 2>&1; then
   out=$(HOME="$TMP/h19" PATH="$MOCKS:/usr/bin:/bin" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1 \
         GH_ACPI_DIR="$TMP/sem-acpi" GH_NET_DIR="$TMP/sem-net" "$ROOT/install.sh" --yes 2>&1)
-  has "mangohud ausente: sugere instalar" "$out" "sudo apt install mangohud"
+  has "mangohud ausente: sugere instalar" "$out" "Sugestao: instale o MangoHud"
 fi
 # Um "monitor" que nao e este (outro programa com o mesmo nome) nao conta.
 H="$TMP/h17"; mkdir -p "$H/.local/bin"

@@ -63,7 +63,7 @@ What the installer detects, and the preset it becomes:
 | Wi-Fi card and `iw` or `iwconfig` | Wi-Fi power saving off during games (with several cards, the connected one) |
 | `monitor` installed | collection on |
 | running user services | **asks** which ones to pause while playing |
-| MangoHud missing | **suggests** installing it (`sudo apt install mangohud`); when installed, shows how to use it: `gamemoderun mangohud %command%` |
+| MangoHud missing | **asks** whether to install it (with `apt-get`, `dnf`, `pacman` or `zypper`); when installed, shows how to use it: `gamemoderun mangohud %command%` |
 
 With `--yes`, or without a terminal, everything that would be a question stays
 off. An existing configuration (`~/.config/gamemode-tweaks.conf`) is never
