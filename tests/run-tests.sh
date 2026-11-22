@@ -160,6 +160,17 @@ out=$(HOME="$H" PATH="$MOCKS:/usr/bin:/bin" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1
 eqv "ausente: coleta desligada"           "$(conf "$H" RUN_MONITOR)" "0"
 has "ausente: mensagem"                   "$out" "monitor de dados não instalado - coleta de dados desligada"
 has "ausente: onde baixar"                "$out" "para instalar, baixe o monitor em (https://github.com/rattones/monitor)"
+# MangoHud: so sugestao. Instalado (falso, no PATH): mostra como usar.
+mkdir -p "$TMP/mango"; printf '#!/bin/sh\nexit 0\n' > "$TMP/mango/mangohud"; chmod +x "$TMP/mango/mangohud"
+out=$(HOME="$TMP/h18" PATH="$TMP/mango:$MOCKS:/usr/bin:/bin" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1 \
+      GH_ACPI_DIR="$TMP/sem-acpi" GH_NET_DIR="$TMP/sem-net" "$ROOT/install.sh" --yes 2>&1)
+has "mangohud instalado: mostra como usar" "$out" "com MangoHud: gamemoderun mangohud %command%"
+lacks "mangohud instalado: sem sugestao"  "$out" "apt install mangohud"
+if ! PATH="$MOCKS:/usr/bin:/bin" command -v mangohud >/dev/null 2>&1; then
+  out=$(HOME="$TMP/h19" PATH="$MOCKS:/usr/bin:/bin" XDG_SESSION_TYPE=x11 GH_ALLOW_USER=1 \
+        GH_ACPI_DIR="$TMP/sem-acpi" GH_NET_DIR="$TMP/sem-net" "$ROOT/install.sh" --yes 2>&1)
+  has "mangohud ausente: sugere instalar" "$out" "sudo apt install mangohud"
+fi
 # Um "monitor" que nao e este (outro programa com o mesmo nome) nao conta.
 H="$TMP/h17"; mkdir -p "$H/.local/bin"
 printf '#!/bin/sh\necho "outro programa"\n' > "$H/.local/bin/monitor"; chmod +x "$H/.local/bin/monitor"
