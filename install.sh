@@ -22,11 +22,11 @@
 #     kscreen-doctor, gdctl ou wlr-randr)
 #   - placa Wi-Fi (e o iw ou iwconfig): economia de energia desligada no jogo
 #   - o monitor (github.com/rattones/monitor), para coletar dados do jogo
-#   - o MangoHud: so uma sugestao (nao e instalado nem configurado aqui)
+#   - o MangoHud: se faltar, oferece instalar pelo gerenciador de pacotes
 #
 # O que e duvida vira pergunta: qual monitor usar no jogo quando ha mais de um,
-# qual perfil de energia quando o firmware nao tem "performance", e quais
-# servicos pausar durante o jogo. Com --yes (ou sem terminal), o que e duvida
+# qual perfil de energia quando o firmware nao tem "performance", quais
+# servicos pausar durante o jogo e se instala o MangoHud. Com --yes (ou sem terminal), o que e duvida
 # fica desligado.
 #
 # Os auxiliares platform-profile e wifi-powersave e as regras do sudoers so sao mostrados: os comandos
@@ -370,17 +370,6 @@ else
   note "para instalar, baixe o monitor em (https://github.com/rattones/monitor)"
 fi
 
-# MangoHud: sobreposicao com FPS, frametime, GPU e CPU no jogo. Nao e usado pelos
-# hooks; so sugere instalar e mostra como ligar, porque combina com o gamemoderun.
-HAS_MANGOHUD=0
-if as_user sh -c 'command -v mangohud' >/dev/null 2>&1; then
-  HAS_MANGOHUD=1
-  note "MangoHud: instalado - para ver FPS, GPU e CPU no jogo: gamemoderun mangohud %command%"
-else
-  note "MangoHud: nao instalado (opcional) - mostra FPS, frametime, GPU e CPU durante o jogo"
-  note "  sugestao: sudo apt install mangohud   (depois: gamemoderun mangohud %command%)"
-fi
-
 # Servicos a pausar: so a pessoa sabe quais atrapalham o jogo.
 PAUSE_SERVICES=""
 if (( INTERACTIVE )); then
@@ -395,6 +384,33 @@ if (( INTERACTIVE )); then
         && PAUSE_SERVICES="${PAUSE_SERVICES:+$PAUSE_SERVICES }$s" \
         || note "  ignorado (nao esta rodando): $s"
     done
+  fi
+fi
+
+# MangoHud: sobreposicao com FPS, frametime, GPU e CPU no jogo. Nao e usado pelos
+# hooks, mas combina com o gamemoderun: se faltar, oferece instalar (a instalacao
+# em si fica para depois, junto com o resto).
+# Comando do gerenciador de pacotes desta distribuicao para instalar o MangoHud.
+pkg_install_cmd() {
+  if   command -v apt-get >/dev/null 2>&1; then echo "apt-get install -y mangohud"
+  elif command -v dnf     >/dev/null 2>&1; then echo "dnf install -y mangohud"
+  elif command -v pacman  >/dev/null 2>&1; then echo "pacman -S --noconfirm --needed mangohud"
+  elif command -v zypper  >/dev/null 2>&1; then echo "zypper --non-interactive install mangohud"
+  fi
+}
+has_mangohud() { as_user sh -c 'command -v mangohud' >/dev/null 2>&1; }
+HAS_MANGOHUD=0; INSTALL_MANGOHUD=0; MANGO_CMD="$(pkg_install_cmd)"
+if has_mangohud; then
+  HAS_MANGOHUD=1
+  note "MangoHud: instalado - para ver FPS, GPU e CPU no jogo: gamemoderun mangohud %command%"
+else
+  note "MangoHud: nao instalado (opcional) - mostra FPS, frametime, GPU e CPU durante o jogo"
+  if [[ -z "$MANGO_CMD" ]]; then
+    note "  instale pelo gerenciador de pacotes da sua distribuicao (pacote mangohud)"
+  else
+    (( INTERACTIVE )) || note "  (sem pergunta - --yes, --check ou sem terminal: nao instala; sudo $MANGO_CMD)"
+    r=$(ask "  instalar o MangoHud agora ($MANGO_CMD)? [s/N]" n)
+    [[ "$r" == [sSyY]* ]] && INSTALL_MANGOHUD=1
   fi
 fi
 
@@ -534,6 +550,19 @@ else
   echo "grupo gamemode: o usermod falhou; rode: sudo usermod -aG gamemode $TU" >&2
 fi
 
+# --- MangoHud ----------------------------------------------------------------------
+if (( INSTALL_MANGOHUD )); then
+  echo
+  echo "MangoHud: instalando ($MANGO_CMD)..."
+  # shellcheck disable=SC2086
+  if $MANGO_CMD && has_mangohud; then
+    HAS_MANGOHUD=1
+    echo "MangoHud: instalado"
+  else
+    echo "MangoHud: a instalacao falhou; tente: sudo $MANGO_CMD" >&2
+  fi
+fi
+
 # --- parte do sistema -------------------------------------------------------------
 
 pending=()
@@ -564,6 +593,6 @@ echo "No jogo (Steam > Propriedades > Opcoes de inicializacao): gamemoderun %com
 if (( HAS_MANGOHUD )); then
   echo "  com MangoHud: gamemoderun mangohud %command%"
 else
-  echo "Sugestao: instale o MangoHud (sudo apt install mangohud) para ver FPS e uso da GPU no jogo."
+  echo "Sugestao: instale o MangoHud${MANGO_CMD:+ (sudo $MANGO_CMD)} para ver FPS e uso da GPU no jogo."
 fi
 echo "Teste do GameMode: gamemoded -t   (deve terminar em \"All Tests Passed\")"

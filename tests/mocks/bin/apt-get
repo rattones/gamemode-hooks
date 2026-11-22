@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# apt-get falso: grava "apt-get ARGS" em MOCK_LOG; "install ... mangohud" poe um
+# mangohud falso em MOCK_MANGO_DIR (que o teste deixa no PATH).
+[[ -n "${MOCK_LOG:-}" ]] && echo "apt-get $*" >> "$MOCK_LOG"
+if [[ " $* " == *" mangohud "* && -n "${MOCK_MANGO_DIR:-}" ]]; then
+  printf '#!/bin/sh\nexit 0\n' > "$MOCK_MANGO_DIR/mangohud"; chmod +x "$MOCK_MANGO_DIR/mangohud"
+fi
+exit 0
