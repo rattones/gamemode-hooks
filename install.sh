@@ -20,16 +20,17 @@
 #   - placa NVIDIA (nvidia-smi, nvidia-settings): PowerMizer e alerta de VRAM
 #   - sessao X11 ou Wayland e monitores conectados (xrandr; no Wayland,
 #     kscreen-doctor, gdctl ou wlr-randr)
-#   - placa Wi-Fi (e o iw ou iwconfig): economia de energia desligada no jogo
+#   - placa Wi-Fi (e o iw ou iwconfig): se o auxiliar wifi-powersave falta,
+#     oferece instala-lo para desligar a economia de energia no jogo
 #   - o monitor (github.com/rattones/monitor), para coletar dados do jogo
 #   - o MangoHud: se faltar, oferece instalar pelo gerenciador de pacotes
 #
 # O que e duvida vira pergunta: qual monitor usar no jogo quando ha mais de um,
 # qual perfil de energia quando o firmware nao tem "performance", quais
-# servicos pausar durante o jogo e se instala o MangoHud. Com --yes (ou sem terminal), o que e duvida
-# fica desligado.
+# servicos pausar durante o jogo, se instala o auxiliar do Wi-Fi e se instala o
+# MangoHud. Com --yes (ou sem terminal), o que e duvida fica desligado.
 #
-# Os auxiliares platform-profile e wifi-powersave e as regras do sudoers so sao mostrados: os comandos
+# O auxiliar platform-profile e a regra do sudoers dele so sao mostrados: os comandos
 # ficam para voce conferir e rodar. Arquivo que ja existe e e diferente vira
 # <arquivo>.bak-<data> antes de ser trocado.
 
@@ -333,7 +334,7 @@ fi
 
 # Wi-Fi: a economia de energia da placa da picos de latencia no jogo online.
 # Com mais de uma placa, fica a que esta conectada (operstate up), senao a primeira.
-SET_WIFI_POWERSAVE=0; WIFI_IFACE=""; WIFI_SUDO=0
+SET_WIFI_POWERSAVE=0; WIFI_IFACE=""; WIFI_SUDO=0; INSTALL_WIFI_HELPER=0; WIFI_FAILED=0; HAS_IW=0
 for d in "$NET_DIR"/*; do
   [[ -d "$d/wireless" || -e "$d/phy80211" ]] || continue
   [[ -z "$WIFI_IFACE" || "$(cat "$d/operstate" 2>/dev/null)" == up ]] || continue
@@ -343,9 +344,25 @@ done
 if [[ -n "$WIFI_IFACE" ]]; then
   if PATH="$PATH:/usr/sbin:/sbin" command -v iw >/dev/null 2>&1 \
      || PATH="$PATH:/usr/sbin:/sbin" command -v iwconfig >/dev/null 2>&1; then
-    SET_WIFI_POWERSAVE=1
-    note "Wi-Fi: $WIFI_IFACE - economia de energia desligada durante o jogo"
-    user_can_sudo "$WIFI_HELPER" && WIFI_SUDO=1
+    HAS_IW=1
+    if user_can_sudo "$WIFI_HELPER"; then
+      WIFI_SUDO=1; SET_WIFI_POWERSAVE=1
+      note "Wi-Fi: $WIFI_IFACE - economia de energia desligada durante o jogo"
+    else
+      # Sem o auxiliar (que roda como root via sudo) os hooks nao conseguem
+      # mexer na placa: a pessoa escolhe se ele e instalado. Se nao, o modo de
+      # energia do Wi-Fi fica como esta.
+      note "Wi-Fi: $WIFI_IFACE - a economia de energia da placa da picos de latencia no jogo online"
+      note "  desligar durante o jogo precisa do auxiliar $WIFI_HELPER e da regra"
+      note "  $WIFI_SUDOERS (liberam so esse comando, sem senha)"
+      (( INTERACTIVE )) || note "  (sem pergunta - --yes, --check ou sem terminal: nao instala; o Wi-Fi fica como esta)"
+      r=$(ask "  instalar o auxiliar e desligar a economia do Wi-Fi durante o jogo? [s/N]" n)
+      if [[ "$r" == [sSyY]* ]]; then
+        SET_WIFI_POWERSAVE=1; INSTALL_WIFI_HELPER=1
+      else
+        note "  economia de energia do Wi-Fi fica como esta"
+      fi
+    fi
   else
     note "Wi-Fi: $WIFI_IFACE, mas sem iw nem iwconfig - economia de energia fica como esta"
     note "  (sudo apt install iw e rode o install.sh de novo)"
@@ -509,6 +526,42 @@ for f in "$SRC"/bin/*; do
   put "$f" "$BIN_DIR/${f##*/}" 0755
 done
 
+# --- auxiliar do Wi-Fi (se a pessoa escolheu) ---------------------------------------
+# Vem antes da configuracao: se a instalacao falhar, o Wi-Fi fica desligado nela.
+# A regra do sudoers e conferida com visudo antes de ir para o lugar, e o
+# auxiliar entra antes dela, ja com dono root (a regra libera esse caminho).
+# put_root <origem> <destino> <modo>: copia como root, se mudou
+put_root() {
+  local src="$1" dst="$SYSROOT$2" mode="$3"
+  if [[ -e "$dst" ]] && cmp -s "$src" "$dst"; then
+    echo "igual:      $2"; return 0
+  fi
+  if (( CHECK )); then
+    [[ -e "$dst" ]] && echo "mudaria:    $2" || echo "criaria:    $2"
+    return 0
+  fi
+  install -d "$(dirname "$dst")" && install -m "$mode" "$src" "$dst" || return 1
+  if (( EUID == 0 )); then chown root:root "$dst" || return 1; fi
+  echo "instalado:  $2"
+}
+# Raiz onde ficam os arquivos do sistema (so os testes trocam).
+SYSROOT="${GH_SYSROOT:-}"
+if (( INSTALL_WIFI_HELPER )); then
+  wtmp="$(mktemp)"
+  sed "s/@USER@/$TU/" "$SRC/system/sudoers-wifi-powersave" > "$wtmp"
+  if ! PATH="$PATH:/usr/sbin:/sbin" visudo -cqf "$wtmp" >/dev/null; then
+    echo "Wi-Fi: a regra do sudoers nao passou no visudo - auxiliar nao instalado" >&2
+    SET_WIFI_POWERSAVE=0; INSTALL_WIFI_HELPER=0; WIFI_FAILED=1
+  elif put_root "$SRC/system/wifi-powersave" "$WIFI_HELPER" 0755 \
+       && put_root "$wtmp" "$WIFI_SUDOERS" 0440; then
+    (( CHECK )) || WIFI_SUDO=1
+  else
+    echo "Wi-Fi: a instalacao do auxiliar falhou - economia de energia fica como esta" >&2
+    SET_WIFI_POWERSAVE=0; INSTALL_WIFI_HELPER=0; WIFI_FAILED=1
+  fi
+  rm -f "$wtmp"
+fi
+
 tmp="$(mktemp)"
 sed "s#@HOME@#${THOME}#g" "$SRC/config/gamemode.ini" > "$tmp"
 put "$tmp" "$CONF_DIR/gamemode.ini" 0644
@@ -571,10 +624,11 @@ if (( SET_PLATFORM_PROFILE )) && [[ -z "$PROFILE_HELPER" ]]; then
   pending+=("sed \"s/@USER@/$TU/\" '$SRC/system/sudoers-platform-profile' | sudo tee /etc/sudoers.d/platform-profile >/dev/null")
   pending+=("sudo chmod 0440 /etc/sudoers.d/platform-profile && sudo visudo -cf /etc/sudoers.d/platform-profile")
 fi
-if (( SET_WIFI_POWERSAVE && ! WIFI_SUDO )); then
+if (( WIFI_FAILED )); then
   pending+=("sudo install -o root -g root -m 0755 '$SRC/system/wifi-powersave' $WIFI_HELPER")
   pending+=("sed \"s/@USER@/$TU/\" '$SRC/system/sudoers-wifi-powersave' | sudo tee $WIFI_SUDOERS >/dev/null")
   pending+=("sudo chmod 0440 $WIFI_SUDOERS && sudo visudo -cf $WIFI_SUDOERS")
+  pending+=("sed -i 's/^SET_WIFI_POWERSAVE=0/SET_WIFI_POWERSAVE=1/' '$CONF'")
 fi
 
 echo
@@ -594,5 +648,9 @@ if (( HAS_MANGOHUD )); then
   echo "  com MangoHud: gamemoderun mangohud %command%"
 else
   echo "Sugestao: instale o MangoHud${MANGO_CMD:+ (sudo $MANGO_CMD)} para ver FPS e uso da GPU no jogo."
+fi
+if (( HAS_IW && ! SET_WIFI_POWERSAVE && ! WIFI_FAILED )); then
+  echo "Wi-Fi: a economia de energia ficou como esta. Para desliga-la no jogo, rode"
+  echo "  sudo $SRC/install.sh de novo e responda \"s\" (instala o auxiliar $WIFI_HELPER)."
 fi
 echo "Teste do GameMode: gamemoded -t   (deve terminar em \"All Tests Passed\")"

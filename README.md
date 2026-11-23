@@ -59,7 +59,7 @@ O instalador detecta e vira pré-configuração:
 | NVIDIA sem `nvidia-settings` | só o alerta de VRAM |
 | mais de um monitor (X11, ou Wayland do KDE, GNOME 48+ ou wlroots) | **pergunta** qual é o monitor do jogo, ou não mexer |
 | um monitor só, ou sem ferramenta de monitores (`xrandr`; no Wayland, `kscreen-doctor`, `gdctl` ou `wlr-randr`) | não mexe nos monitores |
-| placa Wi-Fi e `iw` ou `iwconfig` | economia de energia do Wi-Fi desligada no jogo (com mais de uma placa, a conectada) |
+| placa Wi-Fi e `iw` ou `iwconfig` | com o auxiliar `wifi-powersave` já liberado, economia de energia do Wi-Fi desligada no jogo (com mais de uma placa, a conectada); sem ele, **pergunta** se instala o auxiliar e a regra do sudo (se não, o Wi-Fi fica como está) |
 | `monitor` instalado | coleta ligada |
 | serviços de usuário rodando | **pergunta** quais pausar durante o jogo |
 | MangoHud ausente | **pergunta** se instala (pelo `apt-get`, `dnf`, `pacman` ou `zypper`); instalado, mostra como usar: `gamemoderun mangohud %command%` |
@@ -70,14 +70,15 @@ você dizer: o instalador pergunta, e no modo `--yes` mantém a sua e grava a
 detectada em `gamemode-tweaks.conf.detectado`. Todo arquivo trocado vira
 `<arquivo>.bak-<data>` antes.
 
-Os auxiliares que rodam como root o instalador só mostra, para você conferir
-antes de rodar:
+O auxiliar do Wi-Fi, se você responder que sim, o instalador copia para
+`/usr/local/bin/wifi-powersave` (dono root) e cria a regra
+`/etc/sudoers.d/wifi-powersave`, que libera só esse caminho sem senha (conferida
+com `visudo -c` antes de entrar). O do perfil de energia ele só mostra, para
+você conferir antes de rodar:
 
-- copiar `system/platform-profile` e `system/wifi-powersave` para
-  `/usr/local/bin/` (dono root);
-- criar as regras `/etc/sudoers.d/platform-profile` e
-  `/etc/sudoers.d/wifi-powersave`, que liberam só esses caminhos sem senha
-  (conferidas com `visudo -c`).
+- copiar `system/platform-profile` para `/usr/local/bin/` (dono root);
+- criar a regra `/etc/sudoers.d/platform-profile`, que libera só esse caminho
+  sem senha (conferida com `visudo -c`).
 
 Depois, `gamemoded -t` deve terminar em "All Tests Passed". No jogo (Steam →
 Propriedades → Opções de inicialização): `gamemoderun %command%`.

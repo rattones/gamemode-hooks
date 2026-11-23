@@ -84,9 +84,39 @@ has "sem auxiliar: mostra a copia"        "$out" "/usr/local/bin/platform-profil
 eqv "sem Wi-Fi: desligado"                "$(conf "$H" SET_WIFI_POWERSAVE)/$(conf "$H" WIFI_IFACE)" "0/"
 lacks "sem Wi-Fi: sem sudoers do wifi"    "$out" "wifi-powersave"
 H="$TMP/h2w"
-out=$(NET="$TMP/net1" inst "$H" --yes)
-has "wifi sem auxiliar: mostra o sudoers" "$out" "sudoers.d/wifi-powersave"
-has "wifi sem auxiliar: mostra a copia"   "$out" "system/wifi-powersave' /usr/local/bin/wifi-powersave"
+out=$(NET="$TMP/net1" GH_SYSROOT="$TMP/sys2w" inst "$H" --yes)
+eqv "wifi sem auxiliar --yes: nao mexe"   "$(conf "$H" SET_WIFI_POWERSAVE)/$(conf "$H" WIFI_IFACE)" "0/wlan1"
+has "wifi sem auxiliar --yes: avisa"      "$out" "nao instala; o Wi-Fi fica como esta"
+has "wifi sem auxiliar --yes: sugere"     "$out" "install.sh de novo"
+lacks "wifi sem auxiliar --yes: sem comandos" "$out" "sudoers-wifi-powersave'"
+eqv "wifi sem auxiliar --yes: nada instalado" "$(ls -A "$TMP/sys2w" 2>/dev/null)" ""
+
+# ===========================================================================
+group "Wi-Fi sem o auxiliar: pergunta se instala"
+# ===========================================================================
+# respostas: monitor 0; Wi-Fi s/n. GH_SYSROOT recebe /usr/local/bin e /etc/sudoers.d.
+H="$TMP/h2s"; SYS="$TMP/sys2s"
+out=$(NET="$TMP/net1" INTER=1 GH_SYSROOT="$SYS" inst "$H" <<< $'0\ns\nn')
+has "wifi: pergunta se instala"           "$out" "instalar o auxiliar e desligar a economia do Wi-Fi durante o jogo?"
+eqv "wifi 's': liga na configuracao"      "$(conf "$H" SET_WIFI_POWERSAVE)/$(conf "$H" WIFI_IFACE)" "1/wlan1"
+eqv "wifi 's': instala o auxiliar"        "$(cmp -s "$ROOT/system/wifi-powersave" "$SYS/usr/local/bin/wifi-powersave" && echo igual)" "igual"
+has "wifi 's': regra com o usuario"       "$(cat "$SYS/etc/sudoers.d/wifi-powersave" 2>/dev/null)" "$(id -un) ALL=(root) NOPASSWD: /usr/local/bin/wifi-powersave"
+eqv "wifi 's': regra 0440"                "$(stat -c %a "$SYS/etc/sudoers.d/wifi-powersave" 2>/dev/null)" "440"
+has "wifi 's': confere com visudo"        "$(cat "$H.log" 2>/dev/null)" "visudo -cqf"
+has "wifi 's': nada pendente"             "$out" "Parte do sistema: nada pendente."
+out=$(NET="$TMP/net1" INTER=1 GH_SYSROOT="$SYS" inst "$H" <<< $'0\ns\nn\nn')
+has "wifi 's' de novo: igual"             "$out" "igual:      /usr/local/bin/wifi-powersave"
+H="$TMP/h2n"
+out=$(NET="$TMP/net1" INTER=1 GH_SYSROOT="$TMP/sys2n" inst "$H" <<< $'0\nn\nn')
+eqv "wifi 'n': nao mexe"                  "$(conf "$H" SET_WIFI_POWERSAVE)" "0"
+has "wifi 'n': avisa"                     "$out" "economia de energia do Wi-Fi fica como esta"
+eqv "wifi 'n': nada instalado"            "$(ls -A "$TMP/sys2n" 2>/dev/null)" ""
+H="$TMP/h2f"
+out=$(NET="$TMP/net1" INTER=1 GH_SYSROOT="$TMP/sys2f" MOCK_VISUDO_FAIL=1 inst "$H" <<< $'0\ns\nn')
+eqv "wifi visudo recusa: nao liga"        "$(conf "$H" SET_WIFI_POWERSAVE)" "0"
+has "wifi visudo recusa: avisa"           "$out" "nao passou no visudo"
+eqv "wifi visudo recusa: nada instalado"  "$(ls -A "$TMP/sys2f" 2>/dev/null)" ""
+has "wifi visudo recusa: mostra comandos" "$out" "system/wifi-powersave' /usr/local/bin/wifi-powersave"
 
 # ===========================================================================
 group "perfil sem 'performance' (outro fabricante)"
