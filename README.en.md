@@ -60,7 +60,7 @@ What the installer detects, and the preset it becomes:
 | NVIDIA without `nvidia-settings` | VRAM warning only |
 | more than one monitor (X11, or Wayland on KDE, GNOME 48+ or wlroots) | **asks** which one is the game's monitor, or none |
 | a single monitor, or no monitor tool (`xrandr`; on Wayland, `kscreen-doctor`, `gdctl` or `wlr-randr`) | monitors left alone |
-| Wi-Fi card and `iw` or `iwconfig` | Wi-Fi power saving off during games (with several cards, the connected one) |
+| Wi-Fi card and `iw` or `iwconfig` | with the `wifi-powersave` helper already allowed, Wi-Fi power saving off during games (with several cards, the connected one); without it, **asks** whether to install the helper and its sudo rule (if not, Wi-Fi is left as is) |
 | `monitor` installed | collection on |
 | running user services | **asks** which ones to pause while playing |
 | MangoHud missing | **asks** whether to install it (with `apt-get`, `dnf`, `pacman` or `zypper`); when installed, shows how to use it: `gamemoderun mangohud %command%` |
@@ -71,13 +71,15 @@ replaced unless you say so: the installer asks, and with `--yes` it keeps yours
 and writes the detected one to `gamemode-tweaks.conf.detectado`. Every replaced
 file is saved as `<file>.bak-<date>` first.
 
-The helpers that run as root are only printed, for you to review before running:
+If you answer yes, the installer copies the Wi-Fi helper to
+`/usr/local/bin/wifi-powersave` (owned by root) and creates the rule
+`/etc/sudoers.d/wifi-powersave`, which allows only that path without a password
+(checked with `visudo -c` before it goes in place). The power profile helper is
+only printed, for you to review before running:
 
-- copy `system/platform-profile` and `system/wifi-powersave` to
-  `/usr/local/bin/` (owned by root);
-- create `/etc/sudoers.d/platform-profile` and `/etc/sudoers.d/wifi-powersave`,
-  which allow only those exact paths without a password (checked with
-  `visudo -c`).
+- copy `system/platform-profile` to `/usr/local/bin/` (owned by root);
+- create `/etc/sudoers.d/platform-profile`, which allows only that exact path
+  without a password (checked with `visudo -c`).
 
 Then `gamemoded -t` should end with "All Tests Passed". In the game (Steam →
 Properties → Launch Options): `gamemoderun %command%`.

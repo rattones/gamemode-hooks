@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# visudo falso: grava "visudo ARGS" em MOCK_LOG; MOCK_VISUDO_FAIL=1 recusa a regra.
+[[ -n "${MOCK_LOG:-}" ]] && echo "visudo $*" >> "$MOCK_LOG"
+[[ "${MOCK_VISUDO_FAIL:-}" == 1 ]] && exit 1
+exit 0
