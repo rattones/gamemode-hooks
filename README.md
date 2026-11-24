@@ -172,6 +172,24 @@ travar; as marcas ficam em `<jogo>-<data>-marcas.txt` e entram na análise sem
 precisar digitar a hora. Coletas anteriores ao registro do ping são analisadas
 só pela GPU.
 
+## Apagar coletas antigas
+
+Cada sessão de jogo deixa de 15 a 60 MB em `~/.monitor/log` (o
+`-threads.csv` é o maior). Para manter só os últimos dias:
+
+```bash
+gamemoderun cleanlog 2 --check   # só mostra o que apagaria
+gamemoderun cleanlog 2           # em 24/11, apaga as coletas de 21/11 para trás
+gamemoderun cleanlog 0           # mantém só as de hoje
+```
+
+O número é a quantidade de dias que ficam, além do dia de hoje. O dia é o do
+início da sessão, que está no nome do arquivo: uma sessão que passou da
+meia-noite sai inteira, com todos os arquivos (`.csv`, `-sys`, `-threads`,
+`-ping`, `-marcas`, `.log`). A coleta em andamento nunca é apagada, nem os
+arquivos que não seguem o padrão `<jogo>-AAAAMMDD-HHMMSS`. O diretório é o
+mesmo do monitor (`MONITOR_LOG_DIR`, se estiver definido).
+
 ## Desinstalar
 
 ```bash
@@ -199,7 +217,7 @@ mesmo que `sudo ./install.sh --uninstall`.
 | `bin/gamemode-end.sh` | `~/.local/bin/` | hook de fim: desfaz o start |
 | `bin/gamemode-monitor.sh` | `~/.local/bin/` | acha o PID do jogo pelo D-Bus do GameMode (`ListGames`, mais os filhos, escolhendo o de maior RSS, porque com Proton o jogo é filho dos wrappers da Steam) e roda `monitor all -f pid:N`; com `MONITOR_PERF=auto` acrescenta `-P` quando o `perf` está liberado; grava o ping até o roteador ao lado |
 | `bin/gamemode-travadas` | `~/.local/bin/` | classifica as travadas de uma coleta (PC, Wi-Fi ou servidor) e marca "travou agora" durante o jogo |
-| `bin/gamemoderun` | `~/.local/bin/` | embrulho do `gamemoderun` do sistema: pergunta em tela se o jogo usa um ou todos os monitores e repassa tudo para o `/usr/games/gamemoderun`; `gamemoderun --help` (ou `-h`) explica como iniciar os jogos, as opções por jogo e mostra a configuração desta máquina |
+| `bin/gamemoderun` | `~/.local/bin/` | embrulho do `gamemoderun` do sistema: pergunta em tela se o jogo usa um ou todos os monitores e repassa tudo para o `/usr/games/gamemoderun`; `gamemoderun --help` (ou `-h`) explica como iniciar os jogos, as opções por jogo e mostra a configuração desta máquina; `gamemoderun cleanlog <dias>` apaga as coletas antigas |
 | `bin/gamemode-displays.sh` | `~/.local/bin/` | lê, troca e restaura os monitores com a ferramenta da sessão (`xrandr`, `kscreen-doctor`, `gdctl` ou `wlr-randr`); usado pelos hooks, pelo `gamemoderun` e pelo instalador |
 | `bin/modo-jogo` | `~/.local/bin/` | liga, desliga ou mostra os mesmos ajustes à mão: `modo-jogo on\|off\|toggle\|status` |
 | `uninstall.sh` | — | desinstala: atalho para `install.sh --uninstall` |

@@ -402,6 +402,86 @@ eqv "pula o zenity do runtime da Steam"   "$(env PATH="$TMP/steam-runtime/bin:$H
   HOME="$H" DISPLAY=:0 XDG_SESSION_TYPE=x11 XDG_RUNTIME_DIR="$TMP/gmr-run" MOCK_DIALOG=all "$GMR" jogo 2>&1)" "real: jogo [0]"
 
 # ===========================================================================
+group "gamemoderun cleanlog: apaga as coletas antigas"
+# ===========================================================================
+H="$TMP/h1"; GMR="$H/.local/bin/gamemoderun"; CL="$TMP/cl"
+# sessao NOME AAAAMMDD-HHMMSS sufixos...: os arquivos de uma coleta falsa em $CL
+sessao() { local s="$1-$2" x; shift 2; for x in "$@"; do echo dados > "$CL/$s$x"; done; }
+# coletas: 20/11, 21/11 (passou da meia-noite), 22/11, 23/11 (outro jogo) e 24/11,
+# mais arquivos que nao sao coleta
+prep() {
+  rm -rf "$CL" "$TMP/cl-run"; mkdir -p "$CL" "$TMP/cl-run"
+  sessao dota2 20261120-210000 .csv -sys.csv -threads.csv .log
+  sessao dota2 20261121-231500 .csv -ping.csv -marcas.txt .log
+  touch -d '2026-11-22 01:00' "$CL/dota2-20261121-231500.csv" "$CL/dota2-20261121-231500-ping.csv"
+  sessao dota2 20261122-080000 .csv .log
+  sessao outro-jogo 20261123-120000 .csv
+  sessao dota2 20261124-090000 .csv -threads.csv
+  echo nota > "$CL/notas.txt"
+  mkdir "$CL/pasta-20261101-000000.d"
+  echo alvo > "$TMP/cl-alvo"; ln -s "$TMP/cl-alvo" "$CL/link-20261101-000000.csv"
+}
+# cl args...: roda o gamemoderun cleanlog com hoje = 24/11/2026
+cl() {
+  env -u XDG_CONFIG_HOME HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" XDG_RUNTIME_DIR="$TMP/cl-run" \
+    GH_TODAY=20261124 MONITOR_LOG_DIR="${CLD:-$CL}" "$GMR" cleanlog "$@" 2>&1
+}
+nfiles() { find "$CL" -maxdepth 1 -name "*$1*" | wc -l; }
+
+prep; out=$(cl 2 --check); rc=$?
+eqv "--check: sai com 0"                  "$rc" "0"
+has "--check: diz o que apagaria"         "$out" "apagaria 2 sessoes (8 arquivos"
+has "--check: lista a sessao"             "$out" "dota2-20261120-210000"
+eqv "--check: nao apaga nada"             "$(ls "$CL" | wc -l)" "16"
+out=$(cl 2); rc=$?
+eqv "cleanlog 2: sai com 0"               "$rc" "0"
+has "cleanlog 2: total"                   "$out" "apagadas 2 sessoes (8 arquivos"
+has "cleanlog 2: data do corte"           "$out" "anteriores a 22/11/2026"
+eqv "cleanlog 2: apaga o dia 20"          "$(nfiles 20261120-)" "0"
+eqv "cleanlog 2: apaga a sessao inteira que passou da meia-noite" "$(nfiles 20261121-)" "0"
+eqv "cleanlog 2: mantem o dia 22"         "$(nfiles 20261122-)" "2"
+eqv "cleanlog 2: mantem 23 e 24"          "$(nfiles 20261123-)/$(nfiles 20261124-)" "1/2"
+eqv "fora do padrao: fica"                "$(cat "$CL/notas.txt")" "nota"
+eqv "subdiretorio: fica"                  "$([[ -d "$CL/pasta-20261101-000000.d" ]] && echo sim)" "sim"
+eqv "link: fica, e o alvo tambem"         "$([[ -L "$CL/link-20261101-000000.csv" && -f "$TMP/cl-alvo" ]] && echo sim)" "sim"
+lacks "nao chama o gamemoderun do sistema" "$out" "real:"
+out=$(cl 2); rc=$?
+has "de novo: nada a apagar"              "$out" "nada a apagar"
+eqv "de novo: sai com 0"                  "$rc" "0"
+
+prep; cl 0 >/dev/null
+eqv "cleanlog 0: so fica o dia de hoje"   "$(nfiles 2026112[0-3]-)/$(nfiles 20261124-)" "0/2"
+
+prep; echo "$CL/dota2-20261120-210000.csv" > "$TMP/cl-run/gamemode-monitor.current"
+out=$(cl 2)
+eqv "coleta em andamento: fica"           "$(nfiles 20261120-)" "4"
+eqv "coleta em andamento: o resto sai"    "$(nfiles 20261121-)" "0"
+
+prep
+for a in "" "-1" "abc" "2x" "2 3" "--check" "2 --forca"; do
+  # shellcheck disable=SC2086
+  out=$(cl $a); rc=$?
+  eqv "argumento [${a}]: sai com 2"        "$rc" "2"
+  has "argumento [${a}]: mostra o uso"     "$out" "uso: gamemoderun cleanlog <dias> [--check]"
+done
+eqv "argumento invalido: nao apaga nada"  "$(ls "$CL" | wc -l)" "16"
+
+out=$(CLD="$TMP/cl-nao-existe" cl 2); rc=$?
+eqv "sem diretorio: sai com 0"            "$rc" "0"
+has "sem diretorio: nada a apagar"        "$out" "nada a apagar"
+
+# MONITOR_LOG_DIR so na configuracao: usa o diretorio dela
+prep; HC="$TMP/h-cl"; mkdir -p "$HC/.config"
+printf 'RUN_MONITOR=1\nMONITOR_LOG_DIR="%s"\n' "$CL" > "$HC/.config/gamemode-tweaks.conf"
+out=$(env -u MONITOR_LOG_DIR -u XDG_CONFIG_HOME HOME="$HC" XDG_RUNTIME_DIR="$TMP/cl-run" GH_TODAY=20261124 "$GMR" cleanlog 2 2>&1)
+eqv "diretorio da configuracao"           "$(nfiles 20261120-)/$(nfiles 20261122-)" "0/2"
+eqv "sem configuracao: ~/.monitor/log"    "$(env -u MONITOR_LOG_DIR -u XDG_CONFIG_HOME HOME="$TMP/cl-home" GH_TODAY=20261124 "$GMR" cleanlog 2 --check 2>&1)" \
+  "nada a apagar: nenhuma coleta anterior a 22/11/2026 em $TMP/cl-home/.monitor/log"
+
+has "--help: mostra o cleanlog"           "$(HOME="$H" PATH="$H/.local/bin:$TMP/sysgames:$PATH" "$GMR" --help 2>&1)" "gamemoderun cleanlog <dias> [--check]"
+eqv "jogo com nome parecido: repassa"     "$(gmr DISPLAY= -- cleanlogx 2)" "real: cleanlogx 2 []"
+
+# ===========================================================================
 group "monitor: ping e classificacao das travadas"
 # ===========================================================================
 H="$TMP/h1"; MON="$H/.local/bin/gamemode-monitor.sh"; TRV="$H/.local/bin/gamemode-travadas"

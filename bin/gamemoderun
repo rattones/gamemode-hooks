@@ -91,10 +91,80 @@ Sem resposta em $t s: so no $gm."
   export GAMEMODE_SINGLE_MONITOR=$single
 }
 
+cleanlog_usage() {
+  cat >&2 <<'EOF'
+uso: gamemoderun cleanlog <dias> [--check]
+  Apaga as coletas do monitor anteriores a hoje menos <dias> e mantem as dos
+  ultimos <dias> dias mais as de hoje (0: so as de hoje).
+  --check  so mostra o que apagaria
+EOF
+}
+
+# cleanlog DIAS [--check]: apaga as coletas do monitor anteriores a hoje - DIAS.
+# O dia vem do inicio da sessao no nome (<jogo>-AAAAMMDD-HHMMSS...), entao os
+# arquivos de uma sessao saem juntos, mesmo os gravados depois da meia-noite. So
+# apaga arquivos regulares do primeiro nivel com esse padrao, e nunca a coleta em
+# andamento. GH_TODAY=AAAAMMDD fixa o dia de hoje (so nos testes).
+cleanlog() {
+  local days="${1:-}" check=0 dir today cut cutfmt cur f base sess day
+  local total=0 size verb list=() sessions=()
+  local -A count=()
+  case $# in
+    1) ;;
+    2) [[ "$2" == --check ]] && check=1 || { cleanlog_usage; return 2; } ;;
+    *) cleanlog_usage; return 2 ;;
+  esac
+  [[ "$days" =~ ^[0-9]{1,5}$ ]] || { cleanlog_usage; return 2; }
+
+  dir="${MONITOR_LOG_DIR:-}"
+  [[ -n "$dir" ]] || dir="$(conf_val MONITOR_LOG_DIR)"
+  dir="${dir/#\$HOME/$HOME}"; dir="${dir/#\~/$HOME}"
+  [[ -n "$dir" ]] || dir="$HOME/.monitor/log"
+
+  today="${GH_TODAY:-$(date +%Y%m%d)}"
+  cut=$(date -d "$today -$((10#$days)) days" +%Y%m%d 2>/dev/null) || { cleanlog_usage; return 2; }
+  cutfmt=$(date -d "$cut" +%d/%m/%Y)
+
+  # A coleta em andamento (o gamemode-monitor.sh grava o CSV dela aqui).
+  cur=$(cat "${XDG_RUNTIME_DIR:-/tmp}/gamemode-monitor.current" 2>/dev/null)
+  cur="${cur##*/}"; cur="${cur%.csv}"
+
+  if [[ -d "$dir" ]]; then
+    for f in "$dir"/*; do
+      [[ -f "$f" && ! -L "$f" ]] || continue
+      base="${f##*/}"
+      [[ "$base" =~ ^(.+-([0-9]{8})-[0-9]{6})[-.] ]] || continue
+      sess="${BASH_REMATCH[1]}"; day="${BASH_REMATCH[2]}"
+      [[ "$day" < "$cut" && "$sess" != "$cur" ]] || continue
+      [[ -n "${count[$sess]:-}" ]] || sessions+=("$sess")
+      count[$sess]=$(( ${count[$sess]:-0} + 1 ))
+      list+=("$f")
+      total=$(( total + $(stat -c %s -- "$f") ))
+    done
+  fi
+
+  if (( ${#list[@]} == 0 )); then
+    echo "nada a apagar: nenhuma coleta anterior a $cutfmt em $dir"
+    return 0
+  fi
+  for sess in "${sessions[@]}"; do
+    echo "  $sess (${count[$sess]} arquivos)"
+  done
+  size=$(awk -v b="$total" 'BEGIN { m = b / 1048576; printf (m < 10 ? "%.1f MB" : "%.0f MB"), m }')
+  if (( check )); then
+    verb="apagaria"
+  else
+    rm -f -- "${list[@]}" || return 1
+    verb="apagadas"
+  fi
+  echo "$verb ${#sessions[@]} sessoes (${#list[@]} arquivos, $size) anteriores a $cutfmt em $dir"
+}
+
 usage() {
   local mon prof svc ask mbin
   cat <<'EOF'
 uso: gamemoderun <comando do jogo> [argumentos...]
+     gamemoderun cleanlog <dias> [--check]
      gamemoderun -h | --help
 
 Inicia o jogo com o GameMode ligado. Enquanto o jogo roda, o gamemoded aplica
@@ -131,6 +201,11 @@ COMBINANDO COM OUTRAS FERRAMENTAS
   gamemoderun mangohud %command%
   gamemoderun gamescope -f -- %command%
   GAMEMODE_SINGLE_MONITOR=0 gamemoderun mangohud %command%
+
+COLETAS ANTIGAS (~/.monitor/log)
+  gamemoderun cleanlog 2            apaga as coletas de antes de anteontem
+                                    (mantem hoje e os 2 dias anteriores)
+  gamemoderun cleanlog 2 --check    so mostra o que apagaria
 
 CONFERIR E AJUSTAR
   gamemoded -s              o GameMode esta ativo agora?
@@ -169,6 +244,7 @@ EOF
 
 case "${1:-}" in
   ""|-h|--help) usage; exit 0 ;;
+  cleanlog) shift; cleanlog "$@"; exit $? ;;
 esac
 
 real=$(real_gamemoderun) || {
