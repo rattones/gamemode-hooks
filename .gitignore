@@ -1,2 +1,4 @@
 *.bak-*
 *.detectado
+.claude
+.vscode
