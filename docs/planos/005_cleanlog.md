@@ -1,6 +1,6 @@
 # Plano: 005, comando gamemoderun cleanlog N para apagar coletas antigas
 
-Tarefa: [#5](https://github.com/rattones/gamemode-hooks/issues/5). Decisões: [decisoes/005.md](../decisoes/005.md). Situação: **plano, aguardando aprovação**.
+Tarefa: [#5](https://github.com/rattones/gamemode-hooks/issues/5). Decisões: [decisoes/005.md](../decisoes/005.md). Situação: **aprovado em 24/11/2026**.
 
 ## Objetivo
 

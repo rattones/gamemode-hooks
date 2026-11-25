@@ -174,6 +174,24 @@ game stutters; the marks go to `<game>-<date>-marcas.txt` and are analysed
 without typing the time. Collections from before the ping was recorded are
 analysed by the GPU only.
 
+## Deleting old collections
+
+Each game session leaves 15 to 60 MB in `~/.monitor/log` (the `-threads.csv`
+is the largest). To keep only the last few days:
+
+```bash
+gamemoderun cleanlog 2 --check   # only shows what it would delete
+gamemoderun cleanlog 2           # on 24/11, deletes the collections from 21/11 back
+gamemoderun cleanlog 0           # keeps only today's
+```
+
+The number is how many days are kept, besides today. The day is the session's
+start, taken from the file name: a session that ran past midnight goes as a
+whole, with all its files (`.csv`, `-sys`, `-threads`, `-ping`, `-marcas`,
+`.log`). The collection in progress is never deleted, nor are files that do
+not follow the `<game>-YYYYMMDD-HHMMSS` pattern. The directory is the same as
+monitor's (`MONITOR_LOG_DIR`, if set).
+
 ## Uninstall
 
 ```bash
@@ -200,7 +218,7 @@ without the hooks. Same as `sudo ./install.sh --uninstall`.
 | `bin/gamemode-end.sh` | `~/.local/bin/` | end hook: undoes the start |
 | `bin/gamemode-monitor.sh` | `~/.local/bin/` | finds the game's PID through GameMode's D-Bus API (`ListGames` plus children, picking the largest RSS, since under Proton the game is a child of Steam's wrappers) and runs `monitor all -f pid:N`; with `MONITOR_PERF=auto` it adds `-P` when `perf` is allowed; records the ping to the router next to it |
 | `bin/gamemode-travadas` | `~/.local/bin/` | classifies a collection's stutters (PC, Wi-Fi or server) and marks "it stuttered now" during the game |
-| `bin/gamemoderun` | `~/.local/bin/` | wrapper around the system `gamemoderun`: asks on screen whether the game uses one monitor or all of them and passes everything on to `/usr/games/gamemoderun`; `gamemoderun --help` (or `-h`) explains how to launch games and the per-game options, and shows this machine's settings |
+| `bin/gamemoderun` | `~/.local/bin/` | wrapper around the system `gamemoderun`: asks on screen whether the game uses one monitor or all of them and passes everything on to `/usr/games/gamemoderun`; `gamemoderun --help` (or `-h`) explains how to launch games and the per-game options, and shows this machine's settings; `gamemoderun cleanlog <days>` deletes old collections |
 | `bin/gamemode-displays.sh` | `~/.local/bin/` | reads, switches and restores monitors with the session's tool (`xrandr`, `kscreen-doctor`, `gdctl` or `wlr-randr`); used by the hooks, `gamemoderun` and the installer |
 | `bin/modo-jogo` | `~/.local/bin/` | turns the same tweaks on and off by hand: `modo-jogo on\|off\|toggle\|status` |
 | `uninstall.sh` | — | uninstalls: shortcut for `install.sh --uninstall` |
